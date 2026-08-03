@@ -37,8 +37,14 @@ public class JobPosting {
 
 	private String title;
 
-	/** 스택, 연차, 도메인 등 추출 결과. */
+	/**
+	 * 스택, 연차, 도메인 등 추출 결과.
+	 *
+	 * <p>비워 둘 수 없다. {@code contentHash} 캐시는 한 번 저장된 행을 계속 재사용한다는 뜻이라,
+	 * 파싱이 빠진 채 저장되면 그 상태로 굳는다 (V5 마이그레이션).
+	 */
 	@JdbcTypeCode(SqlTypes.JSON)
+	@Column(nullable = false)
 	private String parsed;
 
 	@Column(name = "created_at", nullable = false, insertable = false, updatable = false)

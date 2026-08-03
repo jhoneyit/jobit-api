@@ -37,6 +37,16 @@ public class LlmCallLog {
 	@Column(name = "output_tokens", nullable = false)
 	private int outputTokens;
 
+	/**
+	 * 프롬프트 캐시 토큰. 읽기와 생성은 단가가 다르므로 입력 토큰에 합산하면 비용이 틀어진다
+	 * (V5 마이그레이션).
+	 */
+	@Column(name = "cache_read_tokens", nullable = false)
+	private int cacheReadTokens;
+
+	@Column(name = "cache_creation_tokens", nullable = false)
+	private int cacheCreationTokens;
+
 	@Column(name = "cost_usd", nullable = false, precision = 12, scale = 6)
 	private BigDecimal costUsd;
 
@@ -50,11 +60,14 @@ public class LlmCallLog {
 	private OffsetDateTime createdAt;
 
 	public LlmCallLog(String feature, String model, int inputTokens, int outputTokens,
-			BigDecimal costUsd, boolean cacheHit, int latencyMs) {
+			int cacheReadTokens, int cacheCreationTokens, BigDecimal costUsd, boolean cacheHit,
+			int latencyMs) {
 		this.feature = feature;
 		this.model = model;
 		this.inputTokens = inputTokens;
 		this.outputTokens = outputTokens;
+		this.cacheReadTokens = cacheReadTokens;
+		this.cacheCreationTokens = cacheCreationTokens;
 		this.costUsd = costUsd;
 		this.cacheHit = cacheHit;
 		this.latencyMs = latencyMs;

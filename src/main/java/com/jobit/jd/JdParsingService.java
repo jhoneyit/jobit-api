@@ -36,25 +36,33 @@ public class JdParsingService {
 	 * LLM 호출 한 번이 낭비되지만 락을 잡는 것보다 낫다 — 흔한 상황이 아니다.
 	 */
 	@Transactional
-	public JobPosting parseOrGetCached(String rawText, String sourceUrl) {
+	public Outcome parseOrGetCached(String rawText, String sourceUrl) {
 		String contentHash = JdTextNormalizer.contentHash(rawText);
 
 		var cached = jobPostingRepository.findByContentHash(contentHash);
 		if (cached.isPresent()) {
 			log.debug("JD cache hit: {}", contentHash);
-			return cached.get();
+			return new Outcome(cached.get(), true);
 		}
 
 		JdParser.ParsedJd parsed = jdParser.parse(JdTextNormalizer.normalize(rawText));
 
 		try {
-			return save(contentHash, rawText, sourceUrl, parsed);
+			return new Outcome(save(contentHash, rawText, sourceUrl, parsed), false);
 		}
 		catch (DataIntegrityViolationException ex) {
 			// 동시 요청이 먼저 저장했다. 그쪽 결과를 쓴다.
 			log.debug("JD cache race lost, reusing existing: {}", contentHash);
-			return jobPostingRepository.findByContentHash(contentHash).orElseThrow(() -> ex);
+			return new Outcome(
+					jobPostingRepository.findByContentHash(contentHash).orElseThrow(() -> ex), true);
 		}
+	}
+
+	/**
+	 * @param cached LLM을 부르지 않고 재사용했는지. 레이트 리밋 소비 여부를 가르는 값이라
+	 *               호출자에게 알려야 한다 (docs/api.md).
+	 */
+	public record Outcome(JobPosting jobPosting, boolean cached) {
 	}
 
 	private JobPosting save(String contentHash, String rawText, String sourceUrl,

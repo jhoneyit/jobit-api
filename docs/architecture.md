@@ -3,6 +3,40 @@
 스펙(`jd-interview-prep-spec.md`)은 스택 중립으로 쓰여 있다. 이 문서는 그것을 Spring Boot 구현으로
 옮길 때의 결정만 담는다. **제품 요구사항·데이터 모델·흐름은 스펙이 원본이므로 여기 복제하지 않는다.**
 
+## 레포 경계 (2026-08-03 확정)
+
+제품은 레포 두 개다. 이 문서와 `api.md`가 그 사이 계약의 원본이다.
+
+```
+jobit-front (Next.js)          jobit (Spring Boot)
+  화면 · SSR · 세션 쿠키   ──▶   REST API · LLM 호출 · DB · 도메인 로직
+```
+
+경계를 가르는 기준 하나: **LLM 키와 DB 커넥션은 이쪽에만 있다.** 프론트가 Anthropic이나
+Postgres에 직접 붙는 코드가 생기면 그 시점에 경계가 무너진 것이다.
+
+| | jobit | jobit-front |
+| --- | --- | --- |
+| JD 파싱 · 질문 생성 · 갭 분석 | ✅ | ❌ 호출만 |
+| DB 스키마 · 마이그레이션 | ✅ Flyway | ❌ |
+| LLM 호출 · 비용 로깅 | ✅ | ❌ |
+| **인증 (가입·로그인·세션·재설정)** | ❌ | **✅ Auth.js** |
+| 화면 · 라우팅 | ❌ | ✅ |
+
+**인증은 프론트에 남긴다** (2026-08-03). 이미 동작하는 Auth.js 흐름(OAuth 콜백·세션·재설정 메일)을
+Spring에서 다시 만드는 비용이 크고, 해시 방식도 BCrypt↔scrypt로 호환되지 않는다. 이 서버는 호출
+시점에 넘어오는 `owner_key`로 소유자를 식별할 뿐 "누가 로그인했는가"를 판단하지 않는다.
+
+그 결과 **이 서버의 `member` · `password_reset_token` 테이블에는 행이 생기지 않는다.** 회원은
+프론트의 `user` 테이블에 있다. 관련 코드(`member` 패키지)는 지우지 않고 두되 사용하지 않는다 —
+3단계에서 이력서(개인정보)를 다룰 때 재검토한다.
+
+> **현황**: `jobit-front`에는 아직 자체 Drizzle 스키마·Auth.js·LLM 호출이 남아 있어 위 표대로
+> 동작하지 않는다. 이관은 진행 예정 작업이며, 현재 상태는 `jobit-front/README.md`에 적혀 있다.
+
+전환 순서는 이쪽에 엔드포인트가 먼저 생겨야 프론트가 갈아탈 수 있다는 제약을 따른다 —
+`api.md`에 계약을 적고 → 컨트롤러를 구현하고 → 프론트가 자체 구현을 걷어낸다.
+
 ## 패키지 구조
 
 도메인형으로 나눈다. 스펙 §3의 테이블 묶음이 그대로 패키지 경계가 된다.
@@ -14,15 +48,34 @@ com.jobit/
   resume/      resume, resume_bullet             — 업로드, bullet 분해, 임베딩
   gap/         gap_analysis, gap_item,
                rewrite_suggestion                — 2단계 갭 분석, 리라이트
-  member/      member, jd_submission             — 인증, 입력 이력 (스펙 §3.6)
+  submission/  jd_submission                     — 입력 이력 (스펙 §3.6, §4.6)
+  member/      member, password_reset_token      — 인증. 현재 미사용 (위 레포 경계 참고)
   llm/         llm_call_log                      — 클라이언트, 구조화 출력, 비용 로깅
-  common/                                        — 공통 예외, 응답 포맷, 설정
+  common/                                        — OwnerKey, 공통 설정
 ```
 
-`jd_submission`은 `member` 패키지에 둔다. `member`와 `job_posting`을 잇지만 소유자는 회원이고,
-조회 진입점이 전부 `/me/*`(스펙 §4.6)이기 때문이다.
+`jd_submission`은 원래 `member` 패키지에 있었다. 소유자가 회원이라고 봤기 때문인데,
+`owner_key`로 바꾸면서 **비회원도 소유자가 되므로** 그 전제가 사라졌다. `member`가 미사용으로
+남는 동안 활성 코드가 그 안에 섞여 있으면 혼란스러워 `submission`으로 분리했다 (2026-08-03).
 
 `llm`은 다른 모든 패키지가 의존하는 하위 레이어다. 반대 방향(도메인 → `llm` 외 도메인) 의존은 만들지 않는다.
+
+### owner_key
+
+개인 자산(`jd_submission.owner_key`, `resume.owner_key`)의 소유자 식별자. 규약은 `common.OwnerKey`가
+강제한다.
+
+```
+로그인   user:<user_id>    ← jobit-front 의 user 테이블 ID
+비로그인 anon:<세션 쿠키>
+```
+
+회원 ID와 익명 세션 키가 한 컬럼을 공유하므로 **접두사가 규약의 전부다.** 조회는 `owner_key`
+하나만 보면 되고 로그인 여부로 분기하지 않는다.
+
+> **이 값은 HTTP로 프론트에서 넘어온다.** 즉 호출자가 문자열을 지어내면 남의 이력을 읽을 수 있다.
+> `OwnerKey.requireValid`는 형식만 검사하며 사칭을 막지 못한다. 호출자 인증이 별도로 필요하고,
+> 그 방식은 아직 미정이다 (아래 미결).
 
 ## 레이어 규칙
 
@@ -42,10 +95,25 @@ com.jobit/
 ### SSE 스트리밍
 
 스펙이 "체감 품질을 좌우한다"고 명시한 부분이다. Spring MVC에서는 `SseEmitter` 또는
-`ResponseBodyEmitter`를 쓴다. htmx는 SSE 확장(`hx-ext="sse"`)으로 수신한다.
+`ResponseBodyEmitter`를 쓴다. 수신은 브라우저의 `EventSource`이므로 서버는 표준
+`text/event-stream`만 지키면 되고, 프론트 프레임워크에 맞춘 처리는 필요 없다.
+
+여기서 끝이 아니다. 구조화 출력을 쓰면 모델은 `{"questions":[{...},{...}]}` 전체를 토큰 단위로
+흘려보낸다. 다 받아서 파싱하면 스트리밍의 의미가 없으므로, **배열 원소 하나가 닫히는 순간
+그 조각만 파싱해 검증하고 즉시 SSE 프레임으로 밀어내는 증분 파서**가 필요하다.
+`jobit-front/src/lib/llm/incremental-array.ts`에 같은 문제를 푼 구현이 있다 — 옮길 때 참고한다.
 
 > 스펙 §2가 Next를 기준안으로 삼은 이유 중 하나가 스트리밍 구현 편의였다. Spring에서는 이 부분에
 > 명시적인 작업이 필요하다는 것을 인지하고 간다.
+
+### 프론트와의 인증 경계
+
+인증은 전부 프론트다. 이 서버는 자격증명을 보지 않고, 호출 시점에 넘어온 `owner_key`로 소유자를
+식별할 뿐이다. `member` 패키지의 `LocalAccountService`·`PasswordResetService`는 그래서 현재
+호출되지 않는다.
+
+호출자를 신뢰할 수 있게 만드는 방법(서비스 토큰 / mTLS / 네트워크 격리)은 **미정**이다.
+정해지기 전까지는 이 서버를 공개망에 노출하면 안 된다 — `owner_key`만 알면 남의 이력을 읽는다.
 
 ### 구조화 출력
 
@@ -57,12 +125,27 @@ LLM 응답 JSON을 DTO로 역직렬화한 뒤 **서버에서 재검증**하고, 
 | 날짜 | 결정 | 이유 |
 | --- | --- | --- |
 | 2026-08-02 | 스키마 관리는 Flyway 마이그레이션 (`ddl-auto` 미사용) | 운영 DB 변경 추적 |
-| 2026-08-02 | 스펙 §7 프론트 구성 → **Spring Boot 단일 + Thymeleaf + htmx** | 익숙한 스택, 서버 하나. 로드맵 4단계에서 재검토 |
+| 2026-08-02 | ~~스펙 §7 프론트 구성 → Spring Boot 단일 + Thymeleaf + htmx~~ | **2026-08-03에 뒤집힘** |
 | 2026-08-02 | 벡터 DB 분리하지 않고 `pgvector` 사용 | 스펙 §2. 인프라 추가 시 관리 비용만 증가 |
+| 2026-08-02 | 비밀번호 해싱은 BCrypt(strength 12), `starter-security`는 미도입 | 해싱만 필요한데 스타터를 넣으면 전 경로에 폼 로그인이 걸린다 |
+| 2026-08-03 | **Spring = REST API 서버 / Next(`jobit-front`) = 프론트** | 이미 동작하는 Next 화면을 살리면서 도메인·LLM·DB를 한쪽으로 모은다. Thymeleaf·htmx는 도입하지 않는다 |
+| 2026-08-03 | **인증은 프론트(Auth.js)에 남긴다.** 이 서버는 `owner_key`만 받는다 | Auth.js 흐름을 Spring에서 재구현하는 비용이 크고 해시가 BCrypt↔scrypt로 호환되지 않는다. `member` 패키지는 미사용으로 남긴다 |
+| 2026-08-03 | `jd_submission.member_id` → `owner_key` (V5) | 인증이 프론트에 있으면 이 서버의 `member`에 행이 없어 FK를 채울 수 없다. 비회원 이력도 이걸로 지원된다 |
+| 2026-08-03 | `jd_submission`을 `member` → `submission` 패키지로 이동 | 소유자가 회원이 아니게 되어 `member`에 둘 근거가 사라졌다 |
+| 2026-08-03 | 컨텍스트 테스트는 Testcontainers로 DB를 마련한다 | `spring-boot-docker-compose`가 `developmentOnly`라 테스트 classpath에 없어 `contextLoads()`가 항상 실패하고 있었다 |
+
+2026-08-02 결정을 뒤집은 이유: 그 시점에는 프론트가 없다고 보고 서버 하나로 끝내려 했으나,
+`jobit-front`가 로드맵 1단계를 이미 구현한 상태였다. 화면을 버리고 Thymeleaf로 다시 만드는 비용이,
+API 계약을 하나 두는 비용보다 크다고 판단했다.
 
 ## 미결
 
-- [ ] 패키지 구조 확정 (위 안대로 갈지)
-- [ ] LLM SDK 선택 및 build.gradle 추가
-- [ ] 익명 세션 키(`owner_key`) 발급 방식
+- [ ] **호출자 인증** — 서비스 토큰 / mTLS / 네트워크 격리. 정해지기 전까지 공개망 노출 금지
+- [ ] **레이트 리밋** — 이 서버에는 아직 없다. 프론트에만 있고, 그쪽은 인스턴스 메모리라 다중
+      인스턴스로 늘리면 무의미해진다. LLM 호출 경로가 늘기 전에 정한다 (스펙 §6)
 - [ ] 이력서 원문 암호화 방식 (컬럼 암호화 vs 애플리케이션 레벨)
+- [x] ~~LLM SDK 선택~~ → Anthropic Java SDK (2026-08-03)
+- [ ] `member` 패키지의 최종 처리 — 3단계에서 인증을 가져올지, 삭제할지
+- [x] ~~`owner_key` 규약 통일~~ → `common.OwnerKey` (2026-08-03)
+- [x] ~~`contextLoads()` DataSource 확보~~ → Testcontainers (2026-08-03)
+- [x] ~~익명 세션 키 발급 주체~~ → 프론트 쿠키. 이 서버는 받기만 한다 (2026-08-03)

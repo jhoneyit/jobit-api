@@ -23,6 +23,8 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-validation'
 	implementation 'org.springframework.boot:spring-boot-starter-webmvc'
 	implementation 'org.flywaydb:flyway-database-postgresql'
+	// LLM. Boot 의 BOM 이 관리하지 않으므로 버전을 명시한다.
+	implementation 'com.anthropic:anthropic-java:2.52.0'
 	// 비밀번호 해싱만 필요하다. spring-boot-starter-security를 넣으면 전 경로에 폼 로그인이
 	// 자동 적용되어 SecurityConfig 없이는 앱이 잠긴다 — 로그인 화면과 함께 도입한다.
 	implementation 'org.springframework.security:spring-security-crypto'
@@ -35,6 +37,13 @@ dependencies {
 	testImplementation 'org.springframework.boot:spring-boot-starter-flyway-test'
 	testImplementation 'org.springframework.boot:spring-boot-starter-validation-test'
 	testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
+	// spring-boot-docker-compose 는 developmentOnly 라 테스트 classpath 에 없다.
+	// 컨텍스트를 띄우는 테스트는 스스로 DB 를 마련해야 한다.
+	// Boot 4 의 BOM 은 testcontainers 버전을 관리하지 않으므로 BOM 을 직접 넣는다.
+	testImplementation platform('org.testcontainers:testcontainers-bom:1.21.3')
+	testImplementation 'org.springframework.boot:spring-boot-testcontainers'
+	testImplementation 'org.testcontainers:postgresql'
+	testImplementation 'org.testcontainers:junit-jupiter'
 	testCompileOnly 'org.projectlombok:lombok'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 	testAnnotationProcessor 'org.projectlombok:lombok'

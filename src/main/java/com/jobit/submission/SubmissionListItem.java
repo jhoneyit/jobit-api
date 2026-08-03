@@ -1,4 +1,4 @@
-package com.jobit.member;
+package com.jobit.submission;
 
 import com.jobit.gap.GapSummary;
 import java.time.OffsetDateTime;

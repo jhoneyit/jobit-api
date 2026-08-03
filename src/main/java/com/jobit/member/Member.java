@@ -1,5 +1,6 @@
 package com.jobit.member;
 
+import com.jobit.common.OwnerKey;
 import jakarta.persistence.*;
 import java.time.OffsetDateTime;
 import java.util.UUID;
@@ -101,9 +102,15 @@ public class Member {
 		this.passwordHash = newPasswordHash;
 	}
 
-	/** 이력서 등의 {@code owner_key}로 쓰이는 값. 익명 세션 키와 같은 필드를 공유한다 (스펙 §3.6). */
+	/**
+	 * 이력서 등의 {@code owner_key}로 쓰이는 값. 익명 세션 키와 같은 컬럼을 공유하므로 접두사가
+	 * 붙는다 (스펙 §3.6, {@link OwnerKey}).
+	 *
+	 * <p>인증이 {@code jobit-front}에 있는 동안 실제 소유자 키는 그쪽 user 테이블 ID로 만들어진다.
+	 * 이 메서드는 이 서버가 회원을 직접 다루게 될 때를 위한 것이다.
+	 */
 	public String ownerKey() {
-		return id.toString();
+		return OwnerKey.forUser(id);
 	}
 
 	@FunctionalInterface
