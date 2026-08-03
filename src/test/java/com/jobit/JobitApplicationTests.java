@@ -1,0 +1,13 @@
+package com.jobit;
+
+import org.junit.jupiter.api.Test;
+import org.springframework.boot.test.context.SpringBootTest;
+
+@SpringBootTest
+class JobitApplicationTests {
+
+	@Test
+	void contextLoads() {
+	}
+
+}

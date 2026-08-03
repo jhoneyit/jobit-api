@@ -1,0 +1,25 @@
+services:
+  postgres:
+    # 기본 postgres 이미지가 아니라 pgvector 확장이 포함된 이미지를 쓴다.
+    # resume_bullet.embedding 컬럼(vector 타입)이 이 확장 없이는 생성되지 않는다.
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_DB: jobit
+      POSTGRES_USER: jobit
+      POSTGRES_PASSWORD: jobit
+    ports:
+      - '5432:5432'
+    labels:
+      # Boot의 service connection 자동 감지는 이미지 이름 기반인데 이 이미지는
+      # 'postgres'가 아니라 'pgvector/pgvector'라 인식되지 않는다. 명시해준다.
+      org.springframework.boot.service-connection: postgres
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U jobit -d jobit']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - jobit-pgdata:/var/lib/postgresql/data
+
+volumes:
+  jobit-pgdata:
