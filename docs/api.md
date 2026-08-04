@@ -2,7 +2,7 @@
 
 **이 문서가 `jobit-front`와의 계약 원본이다.** 엔드포인트를 바꾸면 여기부터 고치고 프론트를 맞춘다.
 
-구현 상태: `POST /api/jd/parse` ✅ / 나머지는 아직 없다.
+구현 상태: `POST /api/jd/parse` ✅ / `GET /api/questions` (SSE) ✅ / `GET /api/stats/stacks` ✅
 
 ## 공통 규약
 
