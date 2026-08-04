@@ -31,8 +31,20 @@ class JdParseParamsTest {
 			.maxTokens(config.maxTokens())
 			.thinking(ThinkingConfigAdaptive.builder().build())
 			.outputConfig(JdParseResponse.class)
-			.addSystemMessage(JdParsePrompts.SYSTEM)
+			.system(JdParsePrompts.SYSTEM)
 			.addUserMessage(JdParsePrompts.userMessage(JD)), config.effort());
+	}
+
+	@Test
+	@DisplayName("시스템 프롬프트는 top-level system 으로 간다 — messages[0] 에 넣으면 400")
+	void putsSystemPromptAtTopLevel() {
+		MessageCreateParams raw = buildParams().rawParams();
+
+		assertThat(raw.system())
+			.as("addSystemMessage 는 messages[0] 에 role:\"system\" 을 넣는다. "
+					+ "그쪽은 대화 중간용이라 첫 자리에 오면 API 가 400 을 준다")
+			.isPresent();
+		assertThat(raw.messages()).as("사용자 메시지 하나만 남아야 한다").hasSize(1);
 	}
 
 	@Test

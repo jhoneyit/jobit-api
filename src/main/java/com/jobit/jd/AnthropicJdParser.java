@@ -88,7 +88,10 @@ public class AnthropicJdParser implements JdParser {
 					// thinking을 끄지 않는다 — LlmModelConfig 주석 참고.
 					.thinking(ThinkingConfigAdaptive.builder().build())
 					.outputConfig(JdParseResponse.class)
-					.addSystemMessage(JdParsePrompts.SYSTEM)
+					// 최초 시스템 프롬프트는 top-level system 이다. addSystemMessage 는
+					// messages[0] 에 role:"system" 으로 넣는데, 그쪽은 대화 중간에 끼우는
+					// 용도라 첫 자리에 오면 400 이 난다.
+					.system(JdParsePrompts.SYSTEM)
 					.addUserMessage(JdParsePrompts.userMessage(rawText)),
 				config.effort());
 
