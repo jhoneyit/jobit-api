@@ -24,15 +24,23 @@ public class LlmCallRecorder {
 
 	private final LlmCallLogRepository repository;
 
-	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public void record(LlmFeature feature, String model, Usage usage, boolean cacheHit,
 			long latencyMs) {
-		try {
-			long input = usage.inputTokens();
-			long output = usage.outputTokens();
-			long cacheRead = usage.cacheReadInputTokens().orElse(0L);
-			long cacheCreation = usage.cacheCreationInputTokens().orElse(0L);
+		record(feature, model, usage.inputTokens(), usage.outputTokens(),
+				usage.cacheReadInputTokens().orElse(0L),
+				usage.cacheCreationInputTokens().orElse(0L), cacheHit, latencyMs);
+	}
 
+	/**
+	 * 토큰 수를 직접 받는 형태.
+	 *
+	 * <p>스트리밍 경로에는 SDK의 {@link Usage} 객체가 없다 — 입력 토큰은 {@code message_start}에,
+	 * 출력 토큰은 {@code message_delta}에 나눠 실려 오므로 호출부가 직접 합산한다.
+	 */
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
+	public void record(LlmFeature feature, String model, long input, long output, long cacheRead,
+			long cacheCreation, boolean cacheHit, long latencyMs) {
+		try {
 			BigDecimal cost = LlmPricing.costUsd(model, input, output, cacheRead, cacheCreation);
 			if (!LlmPricing.isKnownModel(model)) {
 				log.warn("단가표에 없는 모델입니다. 기본 단가로 계산합니다: {}", model);

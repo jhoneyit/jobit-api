@@ -19,8 +19,10 @@ JD(채용공고) 기반 기술 면접 준비 + 이력서 첨삭 서비스의 **�
   `owner_key`로 소유자를 식별할 뿐이다. 그래서 **이 서버의 `member` 테이블에는 행이 생기지 않는다**
   — 회원은 프론트의 `user` 테이블에 있다. `member` 패키지는 현재 미사용이다.
 - **API 계약의 원본은 `docs/api.md`**다. 엔드포인트를 바꾸면 여기부터 고치고 프론트를 맞춘다.
-- `jobit-front`에는 **아직 자체 구현(Drizzle DB·LLM 호출)이 남아 있다.** 그쪽이 이 서버를
-  호출하도록 옮기는 것은 진행 예정 작업이다. 자세한 현황은 `jobit-front/README.md`.
+- **2026-08-04 이관 완료: DB 가 하나다.** `jobit-front` 는 이 서버의 Postgres(`:5432`)를 함께
+  쓰고, JD 파싱과 질문 생성을 이 서버에 위임한다. 그쪽에 남은 것은 화면·인증·세션뿐이다.
+  **스키마 소유권은 이쪽 Flyway 단일이다** — 그쪽 `drizzle-kit` 은 마이그레이션에서 손을 뗐다.
+  컬럼을 바꾸면 여기 마이그레이션을 추가하고 그쪽 `src/lib/db/schema.ts` 를 맞춘다.
 
 > **호출자 인증이 아직 없다.** `owner_key`만 알면 남의 이력을 읽을 수 있으므로
 > 이 서버를 공개망에 노출하면 안 된다 (`docs/architecture.md` 미결).
@@ -158,11 +160,15 @@ src/main/resources/
 
 ## 현재 상태
 
-**로드맵 1단계의 절반 — JD 파싱이 끝까지 동작한다. 질문 생성이 다음이다.**
+**로드맵 1단계 완료 — JD 파싱과 질문 생성이 끝까지 동작하고, 프론트가 이 서버를 호출한다.**
 
 있는 것:
 
 - **`POST /api/jd/parse` 동작** (docs/api.md). 정규화 → 캐시 → LLM 파싱 → 저장까지 전 경로
+- **`GET /api/questions` 동작** — SSE 스트리밍. 완성된 질문을 하나씩 흘려보낸다.
+  `IncrementalArrayParser` 가 스트림에서 완성된 배열 원소를 골라낸다 (문자열 안의 중괄호·
+  이스케이프에 속지 않는 상태 기계). `prompt_version` 이 같으면 재생성하지 않는다.
+  실측: in=2,813 out=3,526 $0.102 / 62초, 두 번째 호출은 캐시로 0초
 - **LLM 연동** — Anthropic Java SDK, 구조화 출력 + 서버 재검증 + 3회 재시도, `llm_call_log` 비용 기록
 - 엔티티 + 리포지토리 전체 (`jd` / `question` / `resume` / `gap` / `submission` / `member` / `llm`)
 - Flyway V1~V5 — pgvector 확장, 코어 스키마, 로컬 가입 컬럼, `password_reset_token`,
@@ -175,9 +181,10 @@ src/main/resources/
 
 없는 것 (= 다음 작업 후보):
 
-- **질문 생성** (스펙 §4.2). `QuestionSet`/`Question` 엔티티만 있고 로직이 없다.
-  SSE 스트리밍 + 증분 파서가 필요하다 (docs/architecture.md 참고)
-- 레이트 리밋 — 지금은 호출 한도가 없다. 프론트에만 있고 이 서버에는 없다
+- **레이트 리밋 — 이게 지금 가장 급하다.** 프론트에만 있어서 이 서버(8080)를 직접 부르면
+  한도가 없다. 프론트가 이 서버를 호출하는 구조가 됐으므로 더 미룰 수 없다
+- 제출 이력 조회·삭제 엔드포인트 — `JdSubmissionService` 는 있고 컨트롤러가 없다.
+  그동안 프론트가 DB 를 직접 읽고 있다
 - 갭 분석·리라이트 (3~4단계)
 - pgvector Hibernate 타입 매핑 — `resume_bullet.embedding`은 JPA 표준 타입이 아니다
 - 인증 관련 컨트롤러 — 인증이 프론트에 있으므로 당분간 필요 없다

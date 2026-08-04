@@ -13,6 +13,7 @@ public interface QuestionRepository extends JpaRepository<Question, UUID> {
 			select q from Question q
 			left join fetch q.requirement
 			where q.questionSet.id = :questionSetId
+			order by q.sortOrder
 			""")
 	List<Question> findForDisplay(@Param("questionSetId") UUID questionSetId);
 }

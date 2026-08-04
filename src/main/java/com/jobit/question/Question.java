@@ -56,8 +56,18 @@ public class Question {
 	@Column(name = "answer_outline")
 	private String answerOutline;
 
+	/**
+	 * 생성된 순서 = 표시 순서.
+	 *
+	 * <p>없으면 조회할 때마다 순서가 뒤바뀐다 — 모델이 난이도와 카테고리를 섞어 배치한 의도가
+	 * 사라진다. V6 에서 컬럼을 추가했다.
+	 */
+	@Column(name = "sort_order", nullable = false)
+	private int sortOrder;
+
 	public Question(QuestionSet questionSet, Requirement requirement, String text,
-			Category category, short difficulty, String followups, String answerOutline) {
+			Category category, short difficulty, String followups, String answerOutline,
+			int sortOrder) {
 		this.questionSet = questionSet;
 		this.requirement = requirement;
 		this.text = text;
@@ -65,5 +75,6 @@ public class Question {
 		this.difficulty = difficulty;
 		this.followups = followups;
 		this.answerOutline = answerOutline;
+		this.sortOrder = sortOrder;
 	}
 }
