@@ -86,9 +86,9 @@ DataSource를 연결한다. **`application.properties`에 접속 정보를 쓰�
   기다려 부팅이 8.5초 → 2.6초 차이로 벌어진다. 이건 접속 정보가 아니라 수명 설정이라
   위의 "접속 정보를 쓰지 않는다"와 충돌하지 않는다.
 
-> **`docker ps`에 Postgres가 두 개 보이는 것이 정상이다.** `jobit-postgres-1`(5432)이
-> 이 서버의 것이고, `jobit-pg`(55432)는 `jobit-front`의 DB다 — Auth.js의 `user`/`session`
-> 테이블이 거기 있다. 이름이 비슷하니 지우지 말 것.
+> **컨테이너는 `jobit-postgres-1`(5432) 하나뿐이다.** 2026-08-04 DB 단일화 전에는
+> `jobit-pg`(55432)에 `jobit-front`의 DB가 따로 있었지만, 이제 프론트도 이 컨테이너를 쓴다.
+> Auth.js의 `user`/`session` 테이블도 여기 있다 (Flyway V6).
 
 `bootRun`은 앱을 붙들고 있는 태스크라 **`BUILD SUCCESSFUL`을 찍지 않는다.** `80% EXECUTING`에서
 멈춘 것처럼 보여도 로그에 `Started JobitApplication in ...`이 나왔으면 이미 뜬 것이다.
