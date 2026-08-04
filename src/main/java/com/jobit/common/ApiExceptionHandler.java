@@ -4,6 +4,8 @@ import com.jobit.jd.JdParserFallbackConfig.JdParserNotConfiguredException;
 import com.jobit.llm.LlmException;
 import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
+import com.jobit.llm.LlmGuard;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -56,6 +58,27 @@ public class ApiExceptionHandler {
 			JdParserNotConfiguredException ex) {
 		log.error("JdParser 구현이 없습니다. ANTHROPIC_API_KEY 설정을 확인하세요.", ex);
 		return body(HttpStatus.INTERNAL_SERVER_ERROR, "공고 분석 기능이 아직 설정되지 않았습니다.");
+	}
+
+	/**
+	 * 소유자별 한도 초과. {@code Retry-After} 를 함께 주어 클라이언트가 언제 다시 시도할지
+	 * 추측하지 않게 한다.
+	 */
+	@ExceptionHandler(LlmGuard.RateLimitExceededException.class)
+	public ResponseEntity<Map<String, String>> rateLimited(
+			LlmGuard.RateLimitExceededException ex) {
+		long minutes = Math.max(1, ex.getRetryAfterSeconds() / 60);
+		return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+			.header(HttpHeaders.RETRY_AFTER, String.valueOf(ex.getRetryAfterSeconds()))
+			.body(Map.of("message",
+					"요청 한도를 초과했습니다. %d분 뒤에 다시 시도해 주세요.".formatted(minutes)));
+	}
+
+	/** 전역 일일 상한. 사용자 잘못이 아니므로 문구가 다르다. */
+	@ExceptionHandler(LlmGuard.DailyBudgetExceededException.class)
+	public ResponseEntity<Map<String, String>> budgetExceeded(
+			LlmGuard.DailyBudgetExceededException ex) {
+		return body(HttpStatus.TOO_MANY_REQUESTS, ex.getMessage());
 	}
 
 	@ExceptionHandler(LlmException.class)

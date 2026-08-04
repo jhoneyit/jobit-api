@@ -8,6 +8,7 @@ import com.jobit.jd.JobPostingRepository;
 import com.jobit.jd.Requirement;
 import com.jobit.jd.RequirementRepository;
 import com.jobit.llm.LlmCallRecorder;
+import com.jobit.llm.LlmGuard;
 import com.jobit.llm.LlmException;
 import com.jobit.llm.LlmFeature;
 import java.util.ArrayList;
@@ -48,6 +49,8 @@ public class QuestionService {
 
 	private final QuestionSetWriter writer;
 
+	private final LlmGuard llmGuard;
+
 	private final LlmCallRecorder callRecorder;
 
 	/** API 키가 없으면 이 빈이 없다. 그 경우 호출 시점에 명확한 예외를 던진다. */
@@ -58,7 +61,8 @@ public class QuestionService {
 	 *
 	 * @param onQuestion 질문 하나가 확정될 때마다 호출된다 (캐시 적중 시에도 같은 콜백으로 흐른다)
 	 */
-	public Outcome generateOrGetCached(UUID jobPostingId, Consumer<QuestionView> onQuestion) {
+	public Outcome generateOrGetCached(UUID jobPostingId, String ownerKey,
+			Consumer<QuestionView> onQuestion) {
 		JobPosting posting = jobPostingRepository.findById(jobPostingId)
 			.orElseThrow(() -> new PostingNotFoundException(jobPostingId));
 
@@ -78,6 +82,9 @@ public class QuestionService {
 		}
 
 		QuestionGenerator gen = generator.orElseThrow(QuestionGeneratorNotConfiguredException::new);
+
+		// 캐시를 지나온 뒤에야 소비한다 — 위 캐시 분기에서 이미 반환됐다면 여기 오지 않는다.
+		llmGuard.checkAndConsume(ownerKey);
 
 		List<QuestionSetWriter.PendingQuestion> pending = new ArrayList<>();
 		Map<String, Object> parsedMeta = readParsed(posting);

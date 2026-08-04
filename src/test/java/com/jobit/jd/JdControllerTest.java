@@ -62,7 +62,7 @@ class JdControllerTest {
 	@Test
 	@DisplayName("파싱 결과를 JSON으로 돌려준다")
 	void returnsParseResult() throws Exception {
-		given(parsingService.parseOrGetCached(anyString(), any()))
+		given(parsingService.parseOrGetCached(anyString(), any(), any()))
 			.willReturn(new JdParsingService.Outcome(posting, false));
 		given(parsingService.requirementsOf(posting)).willReturn(List.of());
 
@@ -79,7 +79,7 @@ class JdControllerTest {
 	@Test
 	@DisplayName("캐시 재사용이면 cached=true — 프론트가 레이트 리밋 소비 여부를 판단한다")
 	void reportsCacheHit() throws Exception {
-		given(parsingService.parseOrGetCached(anyString(), any()))
+		given(parsingService.parseOrGetCached(anyString(), any(), any()))
 			.willReturn(new JdParsingService.Outcome(posting, true));
 		given(parsingService.requirementsOf(posting)).willReturn(List.of());
 
@@ -95,7 +95,7 @@ class JdControllerTest {
 			.andExpect(status().isBadRequest())
 			.andExpect(jsonPath("$.error").exists());
 
-		then(parsingService).should(never()).parseOrGetCached(anyString(), any());
+		then(parsingService).should(never()).parseOrGetCached(anyString(), any(), any());
 	}
 
 	@Test
@@ -110,7 +110,7 @@ class JdControllerTest {
 	@Test
 	@DisplayName("제공자 레이트 리밋은 429로 내린다")
 	void mapsRateLimitTo429() throws Exception {
-		given(parsingService.parseOrGetCached(anyString(), any())).willThrow(
+		given(parsingService.parseOrGetCached(anyString(), any(), any())).willThrow(
 				new LlmException(LlmException.Kind.RATE_LIMIT, "요청이 몰려 잠시 처리할 수 없습니다."));
 
 		mockMvc.perform(post("/api/jd/parse").contentType(MediaType.APPLICATION_JSON)
@@ -122,7 +122,7 @@ class JdControllerTest {
 	@Test
 	@DisplayName("LLM 장애는 502로 내린다 — 사용자 잘못이 아니다")
 	void mapsUpstreamTo502() throws Exception {
-		given(parsingService.parseOrGetCached(anyString(), any()))
+		given(parsingService.parseOrGetCached(anyString(), any(), any()))
 			.willThrow(new LlmException(LlmException.Kind.UPSTREAM, "잠시 후 다시 시도해 주세요."));
 
 		mockMvc.perform(post("/api/jd/parse").contentType(MediaType.APPLICATION_JSON)
@@ -132,7 +132,7 @@ class JdControllerTest {
 	@Test
 	@DisplayName("X-Owner-Key가 있으면 입력 이력에 남긴다")
 	void recordsSubmissionWhenOwnerKeyPresent() throws Exception {
-		given(parsingService.parseOrGetCached(anyString(), any()))
+		given(parsingService.parseOrGetCached(anyString(), any(), any()))
 			.willReturn(new JdParsingService.Outcome(posting, false));
 		given(parsingService.requirementsOf(posting)).willReturn(List.of());
 
@@ -146,7 +146,7 @@ class JdControllerTest {
 	@Test
 	@DisplayName("X-Owner-Key가 없으면 이력을 남기지 않는다 — 비로그인도 파싱은 된다")
 	void skipsSubmissionWithoutOwnerKey() throws Exception {
-		given(parsingService.parseOrGetCached(anyString(), any()))
+		given(parsingService.parseOrGetCached(anyString(), any(), any()))
 			.willReturn(new JdParsingService.Outcome(posting, false));
 		given(parsingService.requirementsOf(posting)).willReturn(List.of());
 
@@ -159,7 +159,7 @@ class JdControllerTest {
 	@Test
 	@DisplayName("이력 기록이 실패해도 파싱 결과는 정상 반환한다")
 	void submissionFailureDoesNotFailRequest() throws Exception {
-		given(parsingService.parseOrGetCached(anyString(), any()))
+		given(parsingService.parseOrGetCached(anyString(), any(), any()))
 			.willReturn(new JdParsingService.Outcome(posting, false));
 		given(parsingService.requirementsOf(posting)).willReturn(List.of());
 		given(submissionService.record(anyString(), any()))
@@ -173,7 +173,7 @@ class JdControllerTest {
 	@Test
 	@DisplayName("형식이 틀린 owner_key는 이력만 건너뛴다 — 파싱은 성공한다")
 	void invalidOwnerKeyDoesNotFailRequest() throws Exception {
-		given(parsingService.parseOrGetCached(anyString(), any()))
+		given(parsingService.parseOrGetCached(anyString(), any(), any()))
 			.willReturn(new JdParsingService.Outcome(posting, false));
 		given(parsingService.requirementsOf(posting)).willReturn(List.of());
 

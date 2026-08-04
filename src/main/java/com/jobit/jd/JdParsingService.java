@@ -1,5 +1,6 @@
 package com.jobit.jd;
 
+import com.jobit.llm.LlmGuard;
 import java.util.ArrayList;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
@@ -28,6 +29,8 @@ public class JdParsingService {
 
 	private final JdParser jdParser;
 
+	private final LlmGuard llmGuard;
+
 	/**
 	 * 캐시가 있으면 재사용하고, 없으면 파싱해 저장한다.
 	 *
@@ -36,7 +39,7 @@ public class JdParsingService {
 	 * LLM 호출 한 번이 낭비되지만 락을 잡는 것보다 낫다 — 흔한 상황이 아니다.
 	 */
 	@Transactional
-	public Outcome parseOrGetCached(String rawText, String sourceUrl) {
+	public Outcome parseOrGetCached(String rawText, String sourceUrl, String ownerKey) {
 		String contentHash = JdTextNormalizer.contentHash(rawText);
 
 		var cached = jobPostingRepository.findByContentHash(contentHash);
@@ -44,6 +47,9 @@ public class JdParsingService {
 			log.debug("JD cache hit: {}", contentHash);
 			return new Outcome(cached.get(), true);
 		}
+
+		// 캐시를 지나온 뒤에야 소비한다 — 캐시 적중은 돈이 나가지 않으므로 한도도 쓰지 않는다.
+		llmGuard.checkAndConsume(ownerKey);
 
 		JdParser.ParsedJd parsed = jdParser.parse(JdTextNormalizer.normalize(rawText));
 

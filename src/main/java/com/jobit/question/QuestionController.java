@@ -1,6 +1,7 @@
 package com.jobit.question;
 
 import com.jobit.llm.LlmException;
+import com.jobit.llm.LlmGuard;
 import java.io.IOException;
 import java.util.Map;
 import java.util.UUID;
@@ -10,6 +11,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -41,13 +43,14 @@ public class QuestionController {
 	private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
 
 	@GetMapping(path = "/api/questions", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-	public SseEmitter stream(@RequestParam UUID jobPostingId) {
+	public SseEmitter stream(@RequestParam UUID jobPostingId,
+			@RequestHeader(name = "X-Owner-Key", required = false) String ownerKey) {
 		SseEmitter emitter = new SseEmitter(TIMEOUT_MS);
 
 		executor.execute(() -> {
 			try {
 				QuestionService.Outcome outcome = questionService.generateOrGetCached(jobPostingId,
-						q -> send(emitter, "question", Map.of("question", q)));
+						ownerKey, q -> send(emitter, "question", Map.of("question", q)));
 
 				send(emitter, "done", Map.of("count", outcome.count(), "questionSetId",
 						outcome.questionSetId() == null ? "" : outcome.questionSetId().toString(),
@@ -59,6 +62,15 @@ public class QuestionController {
 				// llm_call_log 에는 남지만, 여기서 더 할 일은 없다.
 				log.debug("클라이언트가 연결을 끊었습니다: jobPostingId={}", jobPostingId);
 				emitter.complete();
+			}
+			catch (LlmGuard.RateLimitExceededException ex) {
+				// SSE 는 이미 200 으로 헤더가 나갔으므로 @ExceptionHandler 가 끼어들 수 없다.
+				// 상태 코드 대신 error 이벤트로 알린다.
+				long minutes = Math.max(1, ex.getRetryAfterSeconds() / 60);
+				fail(emitter, "요청 한도를 초과했습니다. %d분 뒤에 다시 시도해 주세요.".formatted(minutes));
+			}
+			catch (LlmGuard.DailyBudgetExceededException ex) {
+				fail(emitter, ex.getMessage());
 			}
 			catch (QuestionService.PostingNotFoundException ex) {
 				fail(emitter, "공고를 찾을 수 없습니다. 공고를 다시 붙여넣어 주세요.");

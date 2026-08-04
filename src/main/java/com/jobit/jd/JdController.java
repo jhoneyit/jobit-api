@@ -42,7 +42,7 @@ public class JdController {
 			@RequestHeader(name = "X-Owner-Key", required = false) String ownerKey) {
 
 		JdParsingService.Outcome outcome = parsingService.parseOrGetCached(request.text(),
-				request.sourceUrl());
+				request.sourceUrl(), ownerKey);
 
 		recordSubmission(ownerKey, outcome);
 
