@@ -25,9 +25,8 @@ dependencies {
 	implementation 'org.flywaydb:flyway-database-postgresql'
 	// LLM. Boot 의 BOM 이 관리하지 않으므로 버전을 명시한다.
 	implementation 'com.anthropic:anthropic-java:2.52.0'
-	// 비밀번호 해싱만 필요하다. spring-boot-starter-security를 넣으면 전 경로에 폼 로그인이
-	// 자동 적용되어 SecurityConfig 없이는 앱이 잠긴다 — 로그인 화면과 함께 도입한다.
-	implementation 'org.springframework.security:spring-security-crypto'
+	// 비밀번호 해싱 의존성은 걷어냈다 — 인증은 jobit-front(Auth.js)가 하고 이 서버는
+	// 자격증명을 보지 않는다 (2026-08-04 DB 단일화 때 member 패키지와 함께 정리).
 	compileOnly 'org.projectlombok:lombok'
 	developmentOnly 'org.springframework.boot:spring-boot-devtools'
 	developmentOnly 'org.springframework.boot:spring-boot-docker-compose'

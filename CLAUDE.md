@@ -43,7 +43,8 @@ JD 텍스트 → [파싱] → requirement[] ─┬→ question (질문·꼬리�
 - PostgreSQL + Flyway, `pgvector` 확장 (임베딩 기반 후보 추림에 사용)
 - `spring-security-crypto` (BCrypt strength 12) — 해싱만. `starter-security`는 넣지 않았다
 - Lombok, DevTools
-- LLM: API 종량제, 구조화 출력(JSON schema) 필수 (**아직 의존성 미추가**)
+- LLM: Anthropic Java SDK (`com.anthropic:anthropic-java`), 구조화 출력(JSON schema) 필수.
+  Boot의 BOM이 관리하지 않으므로 `build.gradle`에 버전을 직접 박는다
 
 ### 스택 결정 (중요)
 
@@ -65,6 +66,10 @@ htmx**로 정했었다. 둘 다 현재 결정이 아니다.
 ./gradlew test --tests '*ClassName*'   # 단일 테스트
 ```
 
+`gradle.properties`가 데몬 JVM 인자를 고정하고 configuration cache·빌드 캐시를 켠다. 이게 없으면
+호출 주체(터미널·IDE)마다 인자가 달라져 데몬 재사용에 실패하고, 할 일이 없는 빌드에도
+데몬을 새로 띄우느라 몇 초를 쓴다 (5s → 0.3s).
+
 ### 로컬 DB
 
 `spring-boot-docker-compose`가 `compose.yaml`을 감지해 Postgres 컨테이너를 자동 기동하고
@@ -74,6 +79,19 @@ DataSource를 연결한다. **`application.properties`에 접속 정보를 쓰�
 - Docker Desktop이 떠 있어야 `bootRun`이 동작한다.
 - 이미지는 `pgvector/pgvector:pg17` (기본 postgres 이미지 아님). `vector` 확장이 필요하다.
 - 컨테이너 데이터는 `jobit-pgdata` 볼륨에 유지된다. 초기화하려면 `docker compose down -v`.
+- **앱을 내려도 컨테이너는 살려 둔다** (`spring.docker.compose.lifecycle-management=start-only`).
+  기본값은 `bootRun` 종료 시 컨테이너까지 내리는데, 그러면 재시작마다 healthcheck를 다시
+  기다려 부팅이 8.5초 → 2.6초 차이로 벌어진다. 이건 접속 정보가 아니라 수명 설정이라
+  위의 "접속 정보를 쓰지 않는다"와 충돌하지 않는다.
+
+> **`docker ps`에 Postgres가 두 개 보이는 것이 정상이다.** `jobit-postgres-1`(5432)이
+> 이 서버의 것이고, `jobit-pg`(55432)는 `jobit-front`의 DB다 — Auth.js의 `user`/`session`
+> 테이블이 거기 있다. 이름이 비슷하니 지우지 말 것.
+
+`bootRun`은 앱을 붙들고 있는 태스크라 **`BUILD SUCCESSFUL`을 찍지 않는다.** `80% EXECUTING`에서
+멈춘 것처럼 보여도 로그에 `Started JobitApplication in ...`이 나왔으면 이미 뜬 것이다.
+코드만 고쳤다면 재시작하지 말고 **다른 터미널에서 `./gradlew classes`** — DevTools가 1~2초 만에
+부분 재시작한다. 전체 재시작은 프로퍼티·의존성을 바꿨을 때만 필요하다.
 
 > **이 자동 연결은 테스트에는 적용되지 않는다.** `spring-boot-docker-compose`가
 > `developmentOnly` 스코프라 테스트 classpath에 없다. 그래서 DB가 필요한 테스트는 접속 정보를
@@ -176,6 +194,17 @@ src/main/resources/
 - **`thinking`을 끄지 않는다.** Opus 5에서 끄면 도구 호출이 일반 텍스트로 새거나
   `<thinking>` 태그가 응답에 섞이는 실패 모드가 있다. 비용은 effort로 낮춘다.
 - **재시도도 돈이 나가므로 시도마다 `llm_call_log`에 기록한다.**
+- **실제 호출 검증은 `AnthropicJdParserSmokeTest`에서 한다.** 나머지 테스트는 요청 조립과 빈
+  배선만 보므로, 그 요청이 실제로 통하는지(인증·스키마 파생·effort/thinking 조합·역직렬화)는
+  아무도 확인하지 않는다. Docker도 Spring 컨텍스트도 타지 않고 LLM 경로만 태운다.
+
+  ```bash
+  export ANTHROPIC_API_KEY=sk-ant-...
+  JOBIT_LLM_SMOKE=1 ./gradlew test --tests '*AnthropicJdParserSmokeTest*' -i
+  ```
+
+  **`JOBIT_LLM_SMOKE`가 없으면 건너뛴다**(실패가 아니다). 키만 있다고 매 빌드마다 과금되면
+  안 되므로 켜는 스위치를 따로 뒀다. SDK를 올리거나 프롬프트·스키마를 고친 뒤에는 이걸 한 번 돌린다.
 
 ### 알려진 문제
 
