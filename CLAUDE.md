@@ -24,8 +24,10 @@ JD(채용공고) 기반 기술 면접 준비 + 이력서 첨삭 서비스의 **�
   **스키마 소유권은 이쪽 Flyway 단일이다** — 그쪽 `drizzle-kit` 은 마이그레이션에서 손을 뗐다.
   컬럼을 바꾸면 여기 마이그레이션을 추가하고 그쪽 `src/lib/db/schema.ts` 를 맞춘다.
 
-> **호출자 인증이 아직 없다.** `owner_key`만 알면 남의 이력을 읽을 수 있으므로
-> 이 서버를 공개망에 노출하면 안 된다 (`docs/architecture.md` 미결).
+> **`owner_key`에는 HMAC 서명이 붙는다** (2026-08-07, `common.ServiceAuth`). 프론트와 같은
+> 비밀키(`jobit.auth.service-secret` / `JOBIT_SERVICE_SECRET`)로 서명하며, `/api/*` 필터가
+> 검증한다. **비밀키가 없으면 인증이 꺼진다** — 로컬 전용이고, `prod` 프로파일에서는 앱이
+> 뜨지 않는다.
 
 ## 핵심 구조 (한 문단)
 
@@ -255,8 +257,10 @@ src/main/resources/
 
 ### 알려진 문제
 
-- **호출자 인증이 없다.** `owner_key`는 프론트가 HTTP로 넘기는 값이라, 지어내면 남의 이력을
-  읽을 수 있다. `OwnerKey.requireValid`는 형식만 본다. 공개망에 노출하지 말 것.
+- **비밀키 하나가 전부다.** `jobit.auth.service-secret`이 새면 모든 소유자를 사칭할 수 있다.
+  비대칭 키나 mTLS로 좁힐 수 있지만 과하다고 봤다. **키 회전 절차가 아직 없다** — 지금은
+  양쪽을 동시에 바꿔야 해서 무중단 회전이 안 된다.
+- **비밀키를 설정하지 않으면 인증이 꺼진 채로 뜬다.** 부팅 로그의 경고를 보고 알아채야 한다.
 - **테스트에 Docker가 필요하다.** `contextLoads()`가 Testcontainers로 Postgres를 띄운다.
   Docker가 없으면 이 테스트만 실패한다.
 
