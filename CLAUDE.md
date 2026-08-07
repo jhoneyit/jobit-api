@@ -169,15 +169,29 @@ src/main/resources/
   `IncrementalArrayParser` 가 스트림에서 완성된 배열 원소를 골라낸다 (문자열 안의 중괄호·
   이스케이프에 속지 않는 상태 기계). `prompt_version` 이 같으면 재생성하지 않는다.
   실측: in=2,813 out=3,526 $0.102 / 62초, 두 번째 호출은 캐시로 0초
+- **`GET·DELETE /api/submissions` + `POST /api/submissions/claim` 동작** — 내 기록 목록·삭제·
+  익명 승계. 목록 한 줄에 붙는 집계 셋(요구사항 수·질문 수·갭 요약)을 **공고 ID를 한 번에 넘겨**
+  가져온다. 이걸로 프론트가 `jd_submission`을 직접 읽던 마지막 경로가 사라졌다
+  (관리자 콘솔은 여전히 DB를 직접 읽는다 — 운영용이라 대응 엔드포인트가 없다)
 - **LLM 연동** — Anthropic Java SDK, 구조화 출력 + 서버 재검증 + 3회 재시도, `llm_call_log` 비용 기록
 - 엔티티 + 리포지토리 전체 (`jd` / `question` / `resume` / `gap` / `submission` / `member` / `llm`)
-- Flyway V1~V5 — pgvector 확장, 코어 스키마, 로컬 가입 컬럼, `password_reset_token`,
-  `owner_key` 전환 + 유니크 제약
+- Flyway V1~V10 — pgvector 확장, 코어 스키마, 로컬 가입 컬럼, `password_reset_token`,
+  `owner_key` 전환, DB 단일화, 레이트 리밋, 프로필, 면접 연습(V9~V10)
 - 서비스: `JdParsingService`(캐시·경합 처리),
   `JdSubmissionService`(이력 목록 + 갭 요약, N+1 회피, 익명→계정 승계)
 - 미사용 서비스: `LocalAccountService`, `PasswordResetService`, `MemberService` — 인증이 프론트에 있다
-- 테스트 70개 전부 통과. `contextLoads()`가 Testcontainers로 실제 Postgres를 띄워
-  **Flyway 마이그레이션·엔티티 매핑·JPQL을 매번 검증한다** — 여기가 유일한 통합 검증 지점이다
+- **면접 연습 완료** (`docs/interview-practice-design.md`) — 백엔드 6종 + 프론트 화면
+  (`/interview`, `/profile/interviews`) + `transcript` TTL 정리까지. 스펙에 없는 새 축이다.
+  채점 기준은 새로 만들지 않고 `question.answer_outline`을 쓴다 — 사용자가 결과 화면에서 본
+  그 뼈대가 그대로 기준이다. **오디오는 저장하지 않는다**: STT는 브라우저(Web Speech API)
+  몫이고 서버는 텍스트만 받는다. 실측: 채점 1회 in=2,246 out=174 $0.0156 / 6.6초,
+  5문항 세션 $0.078
+- 테스트 177개 전부 통과. `contextLoads()`가 Testcontainers로 실제 Postgres를 띄워
+  **Flyway 마이그레이션·엔티티 매핑·JPQL을 매번 검증한다.**
+  매핑 검증은 `spring.jpa.hibernate.ddl-auto=validate` 덕분이다 — 이 줄이 없으면 기본값이
+  `none`이라(Testcontainers Postgres는 임베디드가 아니다) **컬럼명을 틀려도 컨텍스트는 뜬다.**
+  2026-08-07까지 실제로 그 상태였다. 저장·조회까지 보려면 별도 테스트가 필요하다
+  (`InterviewPersistenceTest`)
 
 없는 것 (= 다음 작업 후보):
 
@@ -195,6 +209,13 @@ src/main/resources/
 |---|---|---|
 | 소유자별 시간당 한도 | 한 사람의 폭주 | 20회 |
 | 전역 일일 비용 상한 | 여러 사람이 몰렸을 때의 총액 | $5.00 |
+| 면접 연습 일별 세션 | 세션 1건 = LLM N회인 유일한 기능 | 6세션 |
+
+**면접 연습만 세 번째 겹이 필요하다.** 다른 기능은 요청 1건 = LLM 1회지만 면접 연습은 세션 1건이
+문항 수만큼을 먹어서, 시간당 한도만으로는 세션 네 번에 소진되며 공고 분석까지 함께 막힌다.
+`calls-per-hour` 를 올려 해결하지 않는다 — 올리면 다른 기능 방어까지 헐거워진다.
+카운터는 `interview_session` 을 직접 센다 (`rate_limit_bucket` 은 창을 2시간 뒤 정리해서
+일별 창을 둘 수 없다).
 
 - **횟수만으로는 부족하다.** 기능마다 단가가 열 배씩 차이 난다 (파싱 $0.034 / 질문 생성 $0.102).
   그래서 총액은 `llm_call_log.cost_usd` 합계로 따로 막는다.
