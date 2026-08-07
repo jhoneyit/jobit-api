@@ -10,8 +10,10 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 /**
  * API 에러 응답 (docs/api.md 공통 규약).
@@ -47,6 +49,39 @@ public class ApiExceptionHandler {
 	public ResponseEntity<Map<String, String>> handleIllegalArgument(IllegalArgumentException ex) {
 		log.debug("잘못된 인자", ex);
 		return body(HttpStatus.BAD_REQUEST, "요청 값이 올바르지 않습니다.");
+	}
+
+	/**
+	 * 필수 헤더 누락 — 지금은 {@code X-Owner-Key}가 유일하다.
+	 *
+	 * <p>기본 동작은 500이다. 헤더를 빠뜨린 것은 호출자의 실수이므로 400이어야 하고,
+	 * 그래야 프론트가 "서버가 죽었다"와 구분할 수 있다 (docs/api.md 상태 코드 표).
+	 */
+	@ExceptionHandler(MissingRequestHeaderException.class)
+	public ResponseEntity<Map<String, String>> handleMissingHeader(
+			MissingRequestHeaderException ex) {
+		log.debug("필수 헤더 누락: {}", ex.getHeaderName());
+		return body(HttpStatus.BAD_REQUEST, "요청 값이 올바르지 않습니다.");
+	}
+
+	/** 경로 변수 타입 불일치 (UUID 자리에 아무 문자열). 이것도 기본이 500이라 내려 준다. */
+	@ExceptionHandler(MethodArgumentTypeMismatchException.class)
+	public ResponseEntity<Map<String, String>> handleTypeMismatch(
+			MethodArgumentTypeMismatchException ex) {
+		log.debug("경로/파라미터 타입 불일치: {}", ex.getName());
+		return body(HttpStatus.BAD_REQUEST, "요청 값이 올바르지 않습니다.");
+	}
+
+	/**
+	 * 없는 자원, 또는 남의 자원. 둘을 구분하지 않는다 ({@link NotFoundException} 참고).
+	 *
+	 * <p>메시지를 예외에서 꺼내지 않는다 — "submission not found: &lt;uuid&gt;" 같은 내부 문구가
+	 * 그대로 화면에 뜬다. 로그에만 남긴다.
+	 */
+	@ExceptionHandler(NotFoundException.class)
+	public ResponseEntity<Map<String, String>> handleNotFound(NotFoundException ex) {
+		log.debug("자원 없음", ex);
+		return body(HttpStatus.NOT_FOUND, "찾을 수 없습니다.");
 	}
 
 	/**
