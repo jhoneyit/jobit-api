@@ -3,7 +3,8 @@
 **이 문서가 `jobit-front`와의 계약 원본이다.** 엔드포인트를 바꾸면 여기부터 고치고 프론트를 맞춘다.
 
 구현 상태: `POST /api/jd/parse` ✅ / `GET /api/questions` (SSE) ✅ / `GET /api/stats/stacks` ✅ /
-`GET·DELETE /api/submissions` ✅ / `POST /api/submissions/claim` ✅
+`GET·DELETE /api/submissions` ✅ / `POST /api/submissions/claim` ✅ /
+`POST /api/interviews` · `.../answers` · `.../finish` ✅ (기록 조회는 아직)
 
 ## 공통 규약
 
@@ -209,6 +210,128 @@ ID를 넣어 보는 것만으로 남의 이력 존재 여부를 훑을 수 있�
 > `fromOwnerKey`를 지어내면 남의 익명 기록을 자기 계정으로 가져올 수 있다. 프론트는 이 값을
 > 세션 쿠키에서 직접 읽어 넘기지만, 이 서버는 그것을 확인할 방법이 없다.
 > 호출자 인증이 붙기 전까지 이 서버를 공개망에 노출하면 안 된다.
+
+---
+
+## 면접 연습 (docs/interview-practice-design.md)
+
+**오디오를 받지 않는다.** STT는 브라우저(Web Speech API)가 하고 이 서버로는 텍스트만 온다.
+멀티파트도 업로드 상한도 없다 — 이 기능의 개인정보 대책이 사실상 이 한 줄이다.
+
+모두 `X-Owner-Key` 필수. 에러 형태·404 규칙은 `/api/submissions`와 같다.
+
+### `POST /api/interviews` — 세션 시작 ✅
+
+```jsonc
+{ "jobPostingId": "uuid" }
+```
+
+**응답 `200`**
+
+```jsonc
+{
+  "sessionId": "uuid",
+  "jobPostingId": "uuid",
+  "questionCount": 5,
+  "questions": [
+    { "questionId": "uuid", "text": "트랜잭션 격리 수준을…",
+      "category": "CS", "difficulty": 3, "timeLimitSec": 90 }
+  ]
+}
+```
+
+**`answer_outline`(답변 뼈대)이 응답에 없다.** 보고 답하면 연습이 아니다 — 뼈대는 채점 응답에서
+처음 나온다.
+
+**`questionCount`가 설정값(`questions-per-session`)보다 작을 수 있다.** 뼈대가 없는 질문은
+채점 기준이 없어 건너뛴다. 그런 문항을 넣으면 총점의 분모에는 들어가면서 절대 점수를 얻지 못해
+총점이 부당하게 깎인다.
+
+**에러**
+
+| 상태 | 상황 |
+| --- | --- |
+| `400` | `jobPostingId` 누락, **이 공고의 질문이 아직 없음** (`"이 공고의 예상 질문을 먼저 만들어 주세요."`) |
+| `404` | 공고 없음 |
+| `429` | 일별 세션 상한 (`"오늘 면접 연습 횟수를 모두 사용했습니다…"`) |
+
+> **질문이 있는 공고에서만 시작할 수 있다.** 제약이 아니라 진입점이다 — 채점 기준이 질문 생성의
+> 산물이므로, 프론트는 "내 기록"에서 질문이 만들어진 공고를 고르게 한다.
+
+---
+
+### `POST /api/interviews/{sessionId}/answers` — 답변 제출 + 즉시 채점 ✅
+
+```jsonc
+{
+  "questionId": "uuid",
+  "transcript": "격리 수준은 네 가지가 있고요…",  // 시간 내 답하지 못했으면 null 또는 ""
+  "durationMs": 42000
+}
+```
+
+**응답 `200`**
+
+```jsonc
+{
+  "questionId": "uuid",
+  "answered": true,
+  "score": 62,
+  "outline": ["격리 수준 4가지", "이상 현상", "DBMS별 기본값", "실무 선택 기준"],
+  "covered": [0, 1, 2],      // outline 인덱스
+  "missed": [3],
+  "feedback": "네 가지 수준을 정확히 나열하고…",
+  "answeredCount": 3,
+  "questionCount": 5
+}
+```
+
+**`covered`와 `missed`는 겹치지 않고, 합치면 항상 `outline` 전체다.** 서버가 `covered`의
+여집합으로 `missed`를 계산하므로 이 성질이 계산에서 따라 나온다 — 화면은 이걸 믿고 뼈대 옆에
+✅/❌를 붙이면 된다.
+
+**`transcript`가 비어 있는 것은 오류가 아니다.** 제한 시간 안에 한마디도 못 한 경우가 정상
+경로이고 그 자체가 결과다. `answered: false`, `score: 0`, `covered: []`로 기록되며
+**LLM을 부르지 않고 한도도 소비하지 않는다** — 마이크가 안 잡힌 사용자가 자기 한도를 스스로
+태우면 안 된다.
+
+**같은 질문에 다시 제출하면 덮어쓴다.** 마이크가 안 잡혔을 때의 재시도 경로다. 이전 채점 결과는
+함께 지워진다 — 답이 바뀌었는데 점수만 남으면 둘이 어긋난다. `answeredCount`는 늘지 않는다.
+
+**에러**
+
+| 상태 | 상황 |
+| --- | --- |
+| `400` | `questionId` 누락, `transcript` 10,000자 초과, **이미 종료된 세션** |
+| `404` | 세션이 없거나 **내 것이 아님**, 이 세션에 출제되지 않은 질문 |
+| `429` | LLM 호출 한도 (`Retry-After` 포함) 또는 전역 일일 비용 상한 |
+| `500` | `ANTHROPIC_API_KEY` 미설정 (`"답변 채점 기능이 아직 설정되지 않았습니다."`) |
+
+---
+
+### `POST /api/interviews/{sessionId}/finish` — 종료 · 총점 확정 ✅
+
+본문 없음.
+
+**응답 `200`**
+
+```jsonc
+{
+  "sessionId": "uuid",
+  "totalScore": 46,
+  "answeredCount": 3,
+  "questionCount": 5,
+  "finishedAt": "2026-08-07T10:22:11Z"
+}
+```
+
+**총점은 출제된 전 문항의 평균이다.** 답한 것만 평균 내면 한 문항만 답하고 나가는 쪽이
+유리해지므로, **미답변은 0점으로 센다.**
+
+**멱등이다.** 이미 닫힌 세션에 다시 불러도 같은 결과를 준다 — 마지막 문항 제출과 종료가
+겹치거나 사용자가 새로고침하는 것은 정상 경로라 오류로 만들 이유가 없다.
+
+**에러**: `404` 세션이 없거나 내 것이 아님.
 
 ---
 

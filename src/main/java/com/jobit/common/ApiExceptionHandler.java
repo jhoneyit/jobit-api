@@ -1,6 +1,7 @@
 package com.jobit.common;
 
 import com.jobit.interview.AnswerScorerFallbackConfig.AnswerScorerNotConfiguredException;
+import com.jobit.interview.InterviewService;
 import com.jobit.jd.JdParserFallbackConfig.JdParserNotConfiguredException;
 import com.jobit.llm.LlmException;
 import java.util.Map;
@@ -122,6 +123,31 @@ public class ApiExceptionHandler {
 					"요청 한도를 초과했습니다. %d분 뒤에 다시 시도해 주세요.".formatted(minutes)));
 	}
 
+	/**
+	 * 질문이 아직 없는 공고로 면접 연습을 시작하려 했다.
+	 *
+	 * <p>사용자가 할 일이 분명하므로(질문을 먼저 만든다) 문구가 다음 행동을 가리켜야 한다.
+	 * "요청 값이 올바르지 않습니다"로 뭉뚱그리면 무엇을 해야 할지 알 수 없다.
+	 */
+	@ExceptionHandler(InterviewService.QuestionsNotReadyException.class)
+	public ResponseEntity<Map<String, String>> questionsNotReady(
+			InterviewService.QuestionsNotReadyException ex) {
+		log.debug("질문이 없는 공고로 면접 연습 시도", ex);
+		return body(HttpStatus.BAD_REQUEST, "이 공고의 예상 질문을 먼저 만들어 주세요.");
+	}
+
+	/**
+	 * 면접 연습 일별 세션 상한.
+	 *
+	 * <p>{@code Retry-After} 를 주지 않는다 — 창이 자정에 열리므로 "몇 초 뒤"가 사용자에게
+	 * 쓸모 있는 정보가 아니고, 문구로 "내일"이라고 말하는 편이 명확하다.
+	 */
+	@ExceptionHandler(InterviewService.DailySessionLimitExceededException.class)
+	public ResponseEntity<Map<String, String>> dailySessionLimit(
+			InterviewService.DailySessionLimitExceededException ex) {
+		log.info("면접 연습 일별 상한 도달: {}", ex.getMessage());
+		return body(HttpStatus.TOO_MANY_REQUESTS, "오늘 면접 연습 횟수를 모두 사용했습니다. 내일 다시 시도해 주세요.");
+	}
 
 	/** 전역 일일 상한. 사용자 잘못이 아니므로 문구가 다르다. */
 	@ExceptionHandler(LlmGuard.DailyBudgetExceededException.class)
