@@ -4,7 +4,8 @@
 
 구현 상태: `POST /api/jd/parse` ✅ / `GET /api/questions` (SSE) ✅ / `GET /api/stats/stacks` ✅ /
 `GET·DELETE /api/submissions` ✅ / `POST /api/submissions/claim` ✅ /
-`POST /api/interviews` · `.../answers` · `.../finish` ✅ (기록 조회는 아직)
+면접 연습 6종 ✅ (`POST /api/interviews` · `.../answers` · `.../finish` ·
+`GET /api/interviews` · `GET·DELETE /api/interviews/{id}` · `POST /api/interviews/claim`)
 
 ## 공통 규약
 
@@ -332,6 +333,123 @@ ID를 넣어 보는 것만으로 남의 이력 존재 여부를 훑을 수 있�
 겹치거나 사용자가 새로고침하는 것은 정상 경로라 오류로 만들 이유가 없다.
 
 **에러**: `404` 세션이 없거나 내 것이 아님.
+
+---
+
+### `GET /api/interviews` — 내 면접 기록 목록 ✅
+
+```
+GET /api/interviews?page=0&size=20
+헤더: X-Owner-Key (필수)
+```
+
+**응답 `200`**
+
+```jsonc
+{
+  "items": [
+    {
+      "sessionId": "uuid",
+      "jobPostingId": "uuid",
+      "company": "토스",
+      "title": "백엔드 개발자",
+      "totalScore": 72,        // 종료 전이면 null
+      "answeredCount": 4,
+      "questionCount": 5,
+      "startedAt": "2026-08-07T09:30:00Z",
+      "finishedAt": "2026-08-07T09:42:11Z"   // null이면 중간에 이탈했거나 진행 중
+    }
+  ],
+  "page": 0, "size": 20, "totalElements": 3, "totalPages": 1
+}
+```
+
+**`totalScore`가 `null`인 것과 `0`인 것은 다르다.** 전자는 "아직 안 끝냈다", 후자는 "끝냈는데
+한 문항도 못 짚었다"이다. 제출 이력의 `gapSummary`와 같은 규약이다.
+
+**집계 쿼리가 없다.** 총점·답변 수가 이미 세션 행에 있어 한 번의 조회로 끝난다 —
+`/api/submissions`가 세 종류의 집계를 배치로 모으는 것과 대조적이다.
+
+---
+
+### `GET /api/interviews/{sessionId}` — 세션 상세 ✅
+
+**응답 `200`** (목록 필드 + `questions` + `answers`)
+
+```jsonc
+{
+  "sessionId": "uuid", "company": "토스", "totalScore": 72, …,
+
+  // 이 세션에 출제된 문항. **답변 뼈대가 없다** — 뼈대는 아래 answers 안에만 있다.
+  // 연습 화면이 새로고침·새 탭에서 이어서 하려면 이 목록이 필요하다.
+  "questions": [
+    { "questionId": "uuid", "text": "…", "category": "CS",
+      "difficulty": 3, "timeLimitSec": 90 }
+  ],
+
+  "answers": [
+    {
+      "questionId": "uuid",
+      "questionText": "Kafka consumer에서 중복 처리와 순서 보장을…",
+      "category": "DESIGN",
+      "difficulty": 4,
+      "answered": true,
+      "transcript": "네 카프카에서 중복 처리랑…",   // null 일 수 있다 (아래)
+      "score": 52,
+      "outline": ["consumer 멱등성 확보 수단…", "at-least-once 전제와…"],
+      "covered": [0, 3],
+      "missed": [1, 2],
+      "feedback": "파티션 키를 통한 순서 보장과…",
+      "durationMs": 47000,
+      "timeLimitSec": 90
+    }
+  ]
+}
+```
+
+**`transcript`가 `null`인 경우가 둘이고, `answered`가 그 둘을 가른다.**
+
+| `answered` | `transcript` | 뜻 |
+| --- | --- | --- |
+| `false` | `null` | 제한 시간 안에 답하지 못했다 |
+| `true` | `null` | **TTL이 지나 발화 원문만 지웠다.** 점수·피드백은 남는다 |
+| `true` | 있음 | 정상 |
+
+**`timeLimitSec`은 그때의 값이다.** 설정을 바꿔도 과거 기록의 의미가 변하지 않는다.
+
+**에러**: `404` 없거나 내 것이 아님.
+
+---
+
+### `DELETE /api/interviews/{sessionId}` — 기록 삭제 ✅
+
+```
+→ 204 No Content
+```
+
+**답변은 함께 지워지고 질문·공고는 남는다.** 둘 다 공유 자산이고, 특히 공고는 `content_hash`
+전역 캐시라 지우면 남의 캐시 적중까지 깨진다.
+
+**에러**: `404` 없거나 내 것이 아님.
+
+---
+
+### `POST /api/interviews/claim` — 익명 연습 기록을 계정으로 승계 ✅
+
+```jsonc
+// 헤더: X-Owner-Key — 받는 쪽. user: 여야 한다
+{ "fromOwnerKey": "anon:<세션 쿠키>" }
+```
+
+**응답 `200`**: `{ "moved": 2 }`
+
+`/api/submissions/claim`과 같은 규약이고 방향도 같이 강제한다. **엔드포인트를 따로 두는 이유는
+자원이 다르기 때문**이고, 프론트는 로그인 직후 제출 이력·프로필과 함께 이것도 부른다
+(이미 두 개를 따로 부르고 있다).
+
+**제출 이력과 달리 충돌 처리가 없다.** 그쪽은 `(owner_key, job_posting_id)` 유니크 제약 때문에
+양쪽에 같은 공고가 있으면 익명 쪽을 버려야 하지만, 세션은 같은 공고로 몇 번이든 연습할 수 있어
+제약 자체가 없다.
 
 ---
 

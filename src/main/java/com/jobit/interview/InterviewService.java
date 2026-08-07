@@ -1,6 +1,7 @@
 package com.jobit.interview;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jobit.common.NotFoundException;
 import com.jobit.common.OwnerKey;
@@ -19,6 +20,8 @@ import java.util.List;
 import java.util.UUID;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -266,6 +269,127 @@ public class InterviewService {
 	}
 
 	/**
+	 * 면접 기록 목록 ({@code /profile/interviews}).
+	 *
+	 * <p>제출 이력과 달리 <b>집계를 붙이지 않는다.</b> 총점·답변 수가 이미 세션 행에 있어서
+	 * 한 번의 조회로 끝난다 — {@code JdSubmissionService.list}가 세 종류의 집계를 배치로
+	 * 모으는 것과 대조적이다. 점수를 세션에 저장해 둔 값이 여기서 값을 한다.
+	 */
+	@Transactional(readOnly = true)
+	public Page<InterviewSession> list(String ownerKey, Pageable pageable) {
+		OwnerKey.requireValid(ownerKey);
+		return sessionRepository.findByOwner(ownerKey, pageable);
+	}
+
+	/**
+	 * 세션 상세 — 문항별 점수와 뼈대 대조.
+	 *
+	 * <p>{@code transcript}는 <b>null 일 수 있다</b>. 답하지 못했거나, TTL 이 지나 발화 원문만
+	 * 지워진 경우다 (설계 문서 §7). 둘을 {@code answered}로 구분한다.
+	 */
+	@Transactional(readOnly = true)
+	public SessionDetail detail(UUID sessionId, String ownerKey) {
+		InterviewSession session = getOwned(sessionId, ownerKey);
+
+		List<AnsweredQuestion> answers = new ArrayList<>();
+		for (InterviewAnswer answer : answerRepository.findForDisplay(sessionId)) {
+			answers.add(new AnsweredQuestion(answer,
+					AnswerOutlines.parse(answer.getQuestion().getAnswerOutline()),
+					toIndexes(answer.getCovered()), toIndexes(answer.getMissed())));
+		}
+
+		return new SessionDetail(session, toPrompts(sessionQuestions(session)), answers);
+	}
+
+	/**
+	 * 이 세션에 출제된 문항들.
+	 *
+	 * <p><b>왜 상세에 함께 싣는가.</b> 연습 화면이 새로고침을 견디려면 진행 중인 세션의 질문
+	 * 목록을 다시 받을 수 있어야 한다. 시작 응답에만 있으면 새 탭에서 열거나 새로고침하는
+	 * 순간 세션이 미아가 된다.
+	 *
+	 * <p><b>여기에는 답변 뼈대가 없다</b> ({@link QuestionPrompt}). 뼈대는 채점된 답변
+	 * ({@link AnsweredQuestion})에만 실리므로, 아직 답하지 않은 문항의 기준이 새어 나가지 않는다.
+	 *
+	 * <p>{@code start()}와 같은 규칙으로 다시 고른다 — 세션의 질문 세트에서 채점 가능한 것을
+	 * {@code questionCount}개까지. 세션에 그 수를 박아 두었으므로 설정이 바뀌어도 흔들리지 않는다.
+	 */
+	private List<Question> sessionQuestions(InterviewSession session) {
+		List<Question> picked = new ArrayList<>();
+		for (Question question : questionRepository
+			.findForDisplay(session.getQuestionSet().getId())) {
+			if (picked.size() >= session.getQuestionCount()) {
+				break;
+			}
+			if (!AnswerOutlines.parse(question.getAnswerOutline()).isEmpty()) {
+				picked.add(question);
+			}
+		}
+		return picked;
+	}
+
+	/**
+	 * 기록을 지운다.
+	 *
+	 * <p>답변을 <b>명시적으로 먼저 지운다.</b> DB에 {@code ON DELETE CASCADE}가 있어 없어도
+	 * 행은 사라지지만, JPA는 그 cascade 를 모른다 — 같은 트랜잭션에서 답변을 읽어 둔 채로 세션만
+	 * 지우면 영속성 컨텍스트에 남은 답변이 사라진 세션을 참조해 flush 에서 터진다.
+	 *
+	 * <p><b>질문과 공고는 건드리지 않는다</b>: 둘 다 공유 자산이고, 특히 공고는
+	 * {@code content_hash} 전역 캐시라 지우면 남의 캐시 적중까지 깨진다.
+	 */
+	@Transactional
+	public void delete(UUID sessionId, String ownerKey) {
+		InterviewSession session = getOwned(sessionId, ownerKey);
+		answerRepository.deleteBySessionId(sessionId);
+		sessionRepository.delete(session);
+	}
+
+	/**
+	 * 익명으로 쌓은 연습 기록을 계정으로 승계한다.
+	 *
+	 * <p>없으면 "연습해 보고 마음에 들어 로그인했더니 방금 본 점수가 사라진" 상태가 된다 —
+	 * 제출 이력({@code JdSubmissionService.transferOwnership})과 같은 문제다.
+	 *
+	 * <p><b>다만 충돌 처리가 필요 없다.</b> 그쪽은 {@code (owner_key, job_posting_id)} 유니크
+	 * 제약이 있어 양쪽에 같은 공고가 있으면 걸리지만, 세션은 같은 공고로 몇 번이든 연습할 수
+	 * 있어 제약 자체가 없다.
+	 *
+	 * @return 옮겨진 세션 수
+	 */
+	@Transactional
+	public int transferOwnership(String fromOwnerKey, String toOwnerKey) {
+		OwnerKey.requireValid(fromOwnerKey);
+		OwnerKey.requireValid(toOwnerKey);
+		if (fromOwnerKey.equals(toOwnerKey)) {
+			return 0;
+		}
+
+		int moved = sessionRepository.transferOwnership(fromOwnerKey, toOwnerKey);
+		if (moved > 0) {
+			log.info("면접 기록 {}건을 {} 로 옮겼습니다", moved, toOwnerKey);
+		}
+		return moved;
+	}
+
+	/** jsonb 에 저장된 인덱스 배열을 되읽는다. {@link #toJson}의 짝이다. */
+	private List<Integer> toIndexes(String json) {
+		if (json == null || json.isBlank()) {
+			return List.of();
+		}
+		try {
+			return MAPPER.readValue(json, new TypeReference<List<Integer>>() {
+			});
+		}
+		catch (JsonProcessingException ex) {
+			// 우리가 쓴 값이라 여기 올 일이 없지만, 한 줄 때문에 상세 화면이 통째로 죽는
+			// 것보다 그 줄만 비는 편이 낫다.
+			log.warn("채점 인덱스를 읽지 못했습니다", ex);
+			return List.of();
+		}
+	}
+
+	/**
 	 * 이 세션에 출제된 질문인지 확인한다.
 	 *
 	 * <p>세션의 질문 세트에 속하지 않는 질문 id 를 받으면 거절한다 — 없으면 남의 공고 질문에
@@ -318,6 +442,25 @@ public class InterviewService {
 	/** @param outline 채점 후에야 공개되는 답변 뼈대. {@code covered}/{@code missed}가 가리키는 대상 */
 	public record ScoredAnswer(InterviewAnswer answer, List<String> outline,
 			AnswerScorer.Score score) {
+	}
+
+	/**
+	 * @param questions 이 세션에 출제된 문항. <b>뼈대가 없다</b> — 아직 답하지 않은 문항의
+	 *                  채점 기준이 새어 나가면 안 된다. 연습 화면이 새로고침 후 이어서 하려면
+	 *                  이 목록이 필요하다
+	 */
+	public record SessionDetail(InterviewSession session, List<QuestionPrompt> questions,
+			List<AnsweredQuestion> answers) {
+	}
+
+	/**
+	 * 상세 화면의 한 줄 — 문항, 그때 한 답변, 뼈대 대조.
+	 *
+	 * @param outline 질문의 <b>현재</b> 답변 뼈대다. {@code question_set}을 세션에 박아 두었으므로
+	 *                프롬프트 버전이 올라가도 이 질문 자체는 그대로다
+	 */
+	public record AnsweredQuestion(InterviewAnswer answer, List<String> outline,
+			List<Integer> covered, List<Integer> missed) {
 	}
 
 	/** 질문이 아직 없는 공고. 사용자는 질문 생성으로 먼저 가야 한다. */

@@ -6,7 +6,10 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
+import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.never;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -25,6 +28,9 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -263,5 +269,169 @@ class InterviewControllerTest {
 	void rejectsMalformedSessionId() throws Exception {
 		mockMvc.perform(post("/api/interviews/not-a-uuid/finish").header("X-Owner-Key", OWNER))
 			.andExpect(status().isBadRequest());
+	}
+
+	// ── 기록 조회 ────────────────────────────────────────────────
+
+	@Test
+	@DisplayName("기록 목록은 공고와 점수를 함께 준다")
+	void listsRecords() throws Exception {
+		ReflectionTestUtils.setField(session, "answeredCount", (short) 4);
+		session.finish(72, OffsetDateTime.parse("2026-08-07T10:22:11Z"));
+		given(interviewService.list(eq(OWNER), any(Pageable.class)))
+			.willReturn(new PageImpl<>(List.of(session), PageRequest.of(0, 20), 1));
+
+		mockMvc.perform(get("/api/interviews").header("X-Owner-Key", OWNER))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.items[0].sessionId").value(SESSION_ID.toString()))
+			.andExpect(jsonPath("$.items[0].company").value("토스"))
+			.andExpect(jsonPath("$.items[0].totalScore").value(72))
+			.andExpect(jsonPath("$.items[0].answeredCount").value(4))
+			.andExpect(jsonPath("$.totalElements").value(1));
+	}
+
+	@Test
+	@DisplayName("끝나지 않은 세션은 totalScore 가 null — 0점과 구분해야 한다")
+	void leavesTotalScoreNullWhileUnfinished() throws Exception {
+		given(interviewService.list(eq(OWNER), any(Pageable.class)))
+			.willReturn(new PageImpl<>(List.of(session), PageRequest.of(0, 20), 1));
+
+		mockMvc.perform(get("/api/interviews").header("X-Owner-Key", OWNER))
+			.andExpect(jsonPath("$.items[0].totalScore").doesNotExist())
+			.andExpect(jsonPath("$.items[0].finishedAt").doesNotExist());
+	}
+
+	@Test
+	@DisplayName("목록에 X-Owner-Key 가 없으면 400 — 빈 목록으로 얼버무리지 않는다")
+	void requiresOwnerKeyToList() throws Exception {
+		mockMvc.perform(get("/api/interviews")).andExpect(status().isBadRequest());
+
+		then(interviewService).should(never()).list(anyString(), any());
+	}
+
+	@Test
+	@DisplayName("size 는 1~100 으로 잘린다")
+	void clampsPageSize() throws Exception {
+		given(interviewService.list(eq(OWNER), any(Pageable.class)))
+			.willReturn(new PageImpl<>(List.of(), PageRequest.of(0, 100), 0));
+
+		mockMvc.perform(get("/api/interviews").header("X-Owner-Key", OWNER).param("size", "5000"))
+			.andExpect(status().isOk());
+
+		then(interviewService).should().list(OWNER, PageRequest.of(0, 100));
+	}
+
+	@Test
+	@DisplayName("상세는 문항별 점수와 뼈대 대조를 준다")
+	void showsDetail() throws Exception {
+		InterviewService.ScoredAnswer scored = scoredAnswer("격리 수준은...", 62);
+		scored.answer().applyScore(62, "[0]", "[1]", "핵심은 짚었습니다.", OffsetDateTime.now());
+		given(interviewService.detail(SESSION_ID, OWNER))
+			.willReturn(new InterviewService.SessionDetail(session,
+					List.of(new InterviewService.QuestionPrompt(QUESTION_ID, "트랜잭션 격리 수준은?",
+							Question.Category.CS, (short) 3, 90)),
+					List.of(new InterviewService.AnsweredQuestion(scored.answer(),
+							List.of("뼈대 A", "뼈대 B"), List.of(0), List.of(1)))));
+
+		mockMvc.perform(get("/api/interviews/" + SESSION_ID).header("X-Owner-Key", OWNER))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.sessionId").value(SESSION_ID.toString()))
+			// 이어서 하기용 문항 목록. 여기에는 뼈대가 없어야 한다.
+			.andExpect(jsonPath("$.questions[0].questionId").value(QUESTION_ID.toString()))
+			.andExpect(jsonPath("$.questions[0].outline").doesNotExist())
+			.andExpect(jsonPath("$.answers[0].questionText").value("트랜잭션 격리 수준은?"))
+			.andExpect(jsonPath("$.answers[0].answered").value(true))
+			.andExpect(jsonPath("$.answers[0].transcript").value("격리 수준은..."))
+			.andExpect(jsonPath("$.answers[0].score").value(62))
+			.andExpect(jsonPath("$.answers[0].outline[1]").value("뼈대 B"))
+			.andExpect(jsonPath("$.answers[0].covered[0]").value(0))
+			.andExpect(jsonPath("$.answers[0].missed[0]").value(1))
+			.andExpect(jsonPath("$.answers[0].timeLimitSec").value(90));
+	}
+
+	@Test
+	@DisplayName("TTL 이 지나 원문이 지워져도 점수는 남는다 — answered=true 인데 transcript 가 없다")
+	void keepsScoreAfterTranscriptExpiry() throws Exception {
+		InterviewService.ScoredAnswer scored = scoredAnswer("지워질 발화", 80);
+		scored.answer().applyScore(80, "[0,1]", "[]", "잘 답했습니다.", OffsetDateTime.now());
+		scored.answer().forgetTranscript();
+		given(interviewService.detail(SESSION_ID, OWNER))
+			.willReturn(new InterviewService.SessionDetail(session, List.of(),
+					List.of(new InterviewService.AnsweredQuestion(scored.answer(),
+							List.of("뼈대 A", "뼈대 B"), List.of(0, 1), List.of()))));
+
+		mockMvc.perform(get("/api/interviews/" + SESSION_ID).header("X-Owner-Key", OWNER))
+			.andExpect(jsonPath("$.answers[0].transcript").doesNotExist())
+			.andExpect(jsonPath("$.answers[0].score").value(80))
+			.andExpect(jsonPath("$.answers[0].feedback").value("잘 답했습니다."));
+	}
+
+	@Test
+	@DisplayName("남의 기록 상세는 404")
+	void hidesOtherOwnersDetail() throws Exception {
+		given(interviewService.detail(any(), anyString()))
+			.willThrow(new NotFoundException("interview session not found"));
+
+		mockMvc.perform(get("/api/interviews/" + SESSION_ID).header("X-Owner-Key", OWNER))
+			.andExpect(status().isNotFound())
+			.andExpect(jsonPath("$.error").value("찾을 수 없습니다."));
+	}
+
+	@Test
+	@DisplayName("삭제는 204 이고 본문이 없다")
+	void deletesRecord() throws Exception {
+		mockMvc.perform(delete("/api/interviews/" + SESSION_ID).header("X-Owner-Key", OWNER))
+			.andExpect(status().isNoContent());
+
+		then(interviewService).should().delete(SESSION_ID, OWNER);
+	}
+
+	@Test
+	@DisplayName("남의 기록 삭제는 404")
+	void hidesOtherOwnersRecordOnDelete() throws Exception {
+		willThrow(new NotFoundException("not found")).given(interviewService)
+			.delete(eq(SESSION_ID), anyString());
+
+		mockMvc.perform(delete("/api/interviews/" + SESSION_ID).header("X-Owner-Key", OWNER))
+			.andExpect(status().isNotFound());
+	}
+
+	// ── 승계 ─────────────────────────────────────────────────────
+
+	@Test
+	@DisplayName("익명 기록을 계정으로 옮긴다")
+	void claimsAnonymousRecords() throws Exception {
+		given(interviewService.transferOwnership("anon:sess-1", OWNER)).willReturn(2);
+
+		mockMvc
+			.perform(post("/api/interviews/claim").header("X-Owner-Key", OWNER)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"fromOwnerKey\":\"anon:sess-1\"}"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.moved").value(2));
+	}
+
+	@Test
+	@DisplayName("계정 → 익명 방향은 막는다 — 계정 기록을 익명 키로 빼내는 경로가 된다")
+	void rejectsReverseClaim() throws Exception {
+		mockMvc
+			.perform(post("/api/interviews/claim").header("X-Owner-Key", "anon:sess-1")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"fromOwnerKey\":\"" + OWNER + "\"}"))
+			.andExpect(status().isBadRequest());
+
+		then(interviewService).should(never()).transferOwnership(anyString(), anyString());
+	}
+
+	@Test
+	@DisplayName("출처가 익명이 아니면 막는다")
+	void rejectsNonAnonymousSource() throws Exception {
+		mockMvc
+			.perform(post("/api/interviews/claim").header("X-Owner-Key", OWNER)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"fromOwnerKey\":\"user:other\"}"))
+			.andExpect(status().isBadRequest());
+
+		then(interviewService).should(never()).transferOwnership(anyString(), anyString());
 	}
 }

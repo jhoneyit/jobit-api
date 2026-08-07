@@ -16,6 +16,7 @@ import com.jobit.question.QuestionGenPrompts;
 import com.jobit.question.QuestionRepository;
 import com.jobit.question.QuestionSet;
 import com.jobit.question.QuestionSetRepository;
+import jakarta.persistence.EntityManager;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -24,6 +25,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -64,6 +66,9 @@ class InterviewServiceTest {
 
 	@Autowired
 	private QuestionRepository questionRepository;
+
+	@Autowired
+	private EntityManager entityManager;
 
 	@MockitoBean
 	private AnswerScorer scorer;
@@ -309,6 +314,112 @@ class InterviewServiceTest {
 
 		assertThat(finished.getTotalScore()).isZero();
 		assertThat(finished.getAnsweredCount()).isZero();
+	}
+
+	// ── 기록 조회 ────────────────────────────────────────────────
+
+	@Test
+	@DisplayName("상세는 저장된 인덱스를 다시 목록으로 편다 — jsonb 왕복이 실제로 맞물린다")
+	void detailReadsBackIndexes() {
+		givenScore(70, List.of(1));
+		InterviewService.StartedSession started = service.start(OWNER, posting.getId());
+		UUID sessionId = started.session().getId();
+		service.submitAnswer(sessionId, OWNER, questions.getFirst().getId(), "답변", 10_000);
+
+		InterviewService.SessionDetail detail = service.detail(sessionId, OWNER);
+
+		// 이어서 하기용 문항 목록이 함께 온다 — 새로고침해도 세션이 미아가 되지 않는다.
+		assertThat(detail.questions()).hasSize(3);
+		assertThat(detail.answers()).hasSize(1);
+		InterviewService.AnsweredQuestion first = detail.answers().getFirst();
+		assertThat(first.covered()).containsExactly(1);
+		assertThat(first.missed()).containsExactly(0);
+		assertThat(first.outline()).containsExactly("포인트 A", "포인트 B");
+		assertThat(first.answer().getTranscript()).isEqualTo("답변");
+	}
+
+	@Test
+	@DisplayName("답하지 않은 문항도 상세에 남는다 — 무응답 자체가 결과다")
+	void detailIncludesUnansweredQuestions() {
+		InterviewService.StartedSession started = service.start(OWNER, posting.getId());
+		UUID sessionId = started.session().getId();
+		service.submitAnswer(sessionId, OWNER, questions.getFirst().getId(), "", 90_000);
+
+		InterviewService.AnsweredQuestion only = service.detail(sessionId, OWNER)
+			.answers()
+			.getFirst();
+
+		assertThat(only.answer().answered()).isFalse();
+		assertThat(only.answer().getTranscript()).isNull();
+		assertThat(only.missed()).containsExactly(0, 1);
+	}
+
+	@Test
+	@DisplayName("목록은 내 것만, 최근순으로")
+	void listsOwnSessionsOnly() {
+		service.start(OWNER, posting.getId());
+		service.start("user:someone-else", posting.getId());
+
+		assertThat(service.list(OWNER, PageRequest.of(0, 20)).getTotalElements()).isEqualTo(1);
+	}
+
+	@Test
+	@DisplayName("남의 기록 상세는 열리지 않는다")
+	void hidesOtherOwnersDetail() {
+		InterviewService.StartedSession started = service.start(OWNER, posting.getId());
+
+		assertThatThrownBy(() -> service.detail(started.session().getId(), "user:someone-else"))
+			.isInstanceOf(NotFoundException.class);
+	}
+
+	@Test
+	@DisplayName("기록을 지우면 답변도 함께 지워진다 — 세션 없이 남은 답변은 고아다")
+	void deleteCascadesToAnswers() {
+		givenScore(50, List.of(0));
+		InterviewService.StartedSession started = service.start(OWNER, posting.getId());
+		UUID sessionId = started.session().getId();
+		service.submitAnswer(sessionId, OWNER, questions.getFirst().getId(), "답변", 10_000);
+
+		service.delete(sessionId, OWNER);
+		entityManager.flush();
+		entityManager.clear();
+
+		assertThat(sessionRepository.findById(sessionId)).isEmpty();
+		assertThat(answerRepository.findBySessionIdOrderBySortOrder(sessionId)).isEmpty();
+		// 질문과 공고는 공유 자산이라 남아야 한다.
+		assertThat(questionRepository.findById(questions.getFirst().getId())).isPresent();
+		assertThat(jobPostingRepository.findById(posting.getId())).isPresent();
+	}
+
+	@Test
+	@DisplayName("남의 기록은 지워지지 않는다")
+	void cannotDeleteOtherOwnersRecord() {
+		InterviewService.StartedSession started = service.start(OWNER, posting.getId());
+
+		assertThatThrownBy(() -> service.delete(started.session().getId(), "user:someone-else"))
+			.isInstanceOf(NotFoundException.class);
+		assertThat(sessionRepository.findById(started.session().getId())).isPresent();
+	}
+
+	@Test
+	@DisplayName("익명 기록을 계정으로 승계한다 — 같은 공고가 양쪽에 있어도 충돌하지 않는다")
+	void transfersOwnership() {
+		service.start("anon:sess-1", posting.getId());
+		// 제출 이력이라면 유니크 제약에 걸릴 상황이다. 세션은 같은 공고로 몇 번이든 할 수 있다.
+		service.start("user:target", posting.getId());
+
+		int moved = service.transferOwnership("anon:sess-1", "user:target");
+
+		assertThat(moved).isEqualTo(1);
+		assertThat(service.list("user:target", PageRequest.of(0, 20)).getTotalElements())
+			.isEqualTo(2);
+		assertThat(service.list("anon:sess-1", PageRequest.of(0, 20)).getTotalElements()).isZero();
+	}
+
+	@Test
+	@DisplayName("같은 소유자끼리는 옮기지 않는다")
+	void skipsSelfTransfer() {
+		assertThat(service.transferOwnership(OWNER, OWNER)).isZero();
 	}
 
 	@Test
