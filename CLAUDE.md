@@ -139,11 +139,17 @@ src/main/resources/
 자동으로 읽어 주지 않으므로 그 줄이 없으면 파일을 만들어 둬도 조용히 무시된다 — 호출자 인증이
 꺼진 채로 뜨는 것이 그 결과였다. OS 환경변수가 `.env` 보다 우선한다.
 
-**`ANTHROPIC_API_KEY`는 OS 환경변수로 넣는다.** Anthropic Java SDK의
-`AnthropicOkHttpClient.fromEnv()`는 OS 환경변수만 읽는다 —
-`application-local.properties`나 `spring.config.import`로 로드한 값은 Spring Environment에만
-올라가므로 `fromEnv()`가 찾지 못한다. Spring 프로퍼티로 관리하려면 `@Value`로 주입해
-`AnthropicOkHttpClient.builder().apiKey(...)`를 직접 호출해야 한다.
+**LLM 키는 `.env` 에 `anthropic.api-key` 라는 이름으로 넣는다** — 이 파일에서 유일하게
+SHOUT_CASE 가 아니다. `AnthropicConfig` 의 `@ConditionalOnProperty("anthropic.api-key")` 가
+그 이름을 그대로 찾는데, `ANTHROPIC_API_KEY` → `anthropic.api-key` 완화 바인딩은
+**OS 환경변수 소스에만** 적용되고 properties 로 읽는 `.env` 에는 적용되지 않는다.
+SHOUT_CASE 로 적으면 조용히 무시되고 폴백이 자리를 지킨다.
+
+(`AnthropicOkHttpClient.fromEnv()` 는 쓰지 않는다. 그쪽이야말로 OS 환경변수만 읽는다 —
+`AnthropicConfig` 가 `@Value` 로 받아 `builder().apiKey(...)` 에 직접 넘긴다.)
+
+**스모크 테스트는 여전히 OS 환경변수를 본다.** `System.getenv` 를 직접 읽으므로 `.env` 에만
+넣으면 조용히 건너뛴다 — 돌릴 때만 `export ANTHROPIC_API_KEY=...` 한다.
 
 ## 문서
 
