@@ -33,7 +33,12 @@ public final class LlmModelConfig {
 			LlmFeature.GAP_ANALYSIS,
 			new FeatureConfig(DEFAULT_MODEL, OutputConfig.Effort.MEDIUM, 4_000L),
 			// 4단계 — 문장 하나를 고쳐 쓴다. 문장 품질이 곧 제품 가치.
-			LlmFeature.REWRITE, new FeatureConfig(DEFAULT_MODEL, OutputConfig.Effort.HIGH, 4_000L));
+			LlmFeature.REWRITE, new FeatureConfig(DEFAULT_MODEL, OutputConfig.Effort.HIGH, 4_000L),
+			// 면접 답변 채점 — 답변 하나가 뼈대를 짚었는지 보는 판정이다. 성격이 갭 분석과
+			// 같아 effort 도 같이 간다. **호출 수가 많은 유일한 기능이라** (세션 1건 =
+			// 문항 수만큼) effort 를 올리면 비용이 다른 기능보다 빠르게 는다.
+			LlmFeature.ANSWER_SCORING,
+			new FeatureConfig(DEFAULT_MODEL, OutputConfig.Effort.MEDIUM, 4_000L));
 
 	private LlmModelConfig() {
 	}
