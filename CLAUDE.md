@@ -133,7 +133,11 @@ src/main/resources/
 
 ### 비밀값
 
-키 목록은 `.env.example` 참고. 실제 값은 커밋하지 않는다.
+키 목록은 `.env.example`, 실제 값은 `.env`(`.gitignore` 대상)에 넣는다.
+
+**`.env` 는 `application.properties` 의 `spring.config.import` 가 읽는다.** Spring Boot 가
+자동으로 읽어 주지 않으므로 그 줄이 없으면 파일을 만들어 둬도 조용히 무시된다 — 호출자 인증이
+꺼진 채로 뜨는 것이 그 결과였다. OS 환경변수가 `.env` 보다 우선한다.
 
 **`ANTHROPIC_API_KEY`는 OS 환경변수로 넣는다.** Anthropic Java SDK의
 `AnthropicOkHttpClient.fromEnv()`는 OS 환경변수만 읽는다 —
