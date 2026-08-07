@@ -98,6 +98,10 @@ public class ApiExceptionHandler {
 	/**
 	 * 소유자별 한도 초과. {@code Retry-After} 를 함께 주어 클라이언트가 언제 다시 시도할지
 	 * 추측하지 않게 한다.
+	 *
+	 * <p>이 응답만 {@code message} 키를 쓰고 있었다. 규약은 {@code error} 하나다 —
+	 * 키가 둘이면 프론트가 오류 문구를 꺼낼 때마다 어느 쪽인지 따져야 한다.
+	 * ({@code QuestionController} 의 SSE {@code error} 이벤트는 별개 계약이라 {@code message} 다.)
 	 */
 	@ExceptionHandler(LlmGuard.RateLimitExceededException.class)
 	public ResponseEntity<Map<String, String>> rateLimited(
@@ -105,7 +109,7 @@ public class ApiExceptionHandler {
 		long minutes = Math.max(1, ex.getRetryAfterSeconds() / 60);
 		return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
 			.header(HttpHeaders.RETRY_AFTER, String.valueOf(ex.getRetryAfterSeconds()))
-			.body(Map.of("message",
+			.body(Map.of("error",
 					"요청 한도를 초과했습니다. %d분 뒤에 다시 시도해 주세요.".formatted(minutes)));
 	}
 

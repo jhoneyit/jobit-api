@@ -7,11 +7,13 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.never;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.jobit.common.ApiExceptionHandler;
 import com.jobit.llm.LlmException;
+import com.jobit.llm.LlmGuard;
 import com.jobit.submission.JdSubmissionService;
 import java.util.List;
 import java.util.UUID;
@@ -117,6 +119,21 @@ class JdControllerTest {
 			.content(body(VALID_JD)))
 			.andExpect(status().isTooManyRequests())
 			.andExpect(jsonPath("$.error").value("요청이 몰려 잠시 처리할 수 없습니다."));
+	}
+
+	@Test
+	@DisplayName("소유자 한도 초과도 에러 키는 error 다 — 이 응답만 message 를 쓰고 있었다")
+	void ownerRateLimitUsesErrorKey() throws Exception {
+		given(parsingService.parseOrGetCached(anyString(), any(), any()))
+			.willThrow(new LlmGuard.RateLimitExceededException(1800));
+
+		mockMvc.perform(post("/api/jd/parse").contentType(MediaType.APPLICATION_JSON)
+			.content(body(VALID_JD)))
+			.andExpect(status().isTooManyRequests())
+			// Retry-After 가 있어야 클라이언트가 언제 다시 시도할지 추측하지 않는다.
+			.andExpect(header().string("Retry-After", "1800"))
+			.andExpect(jsonPath("$.error").value("요청 한도를 초과했습니다. 30분 뒤에 다시 시도해 주세요."))
+			.andExpect(jsonPath("$.message").doesNotExist());
 	}
 
 	@Test
