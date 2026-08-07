@@ -196,8 +196,9 @@ SHOUT_CASE 로 적으면 조용히 무시되고 폴백이 자리를 지킨다.
   (`/interview`, `/profile/interviews`) + `transcript` TTL 정리까지. 스펙에 없는 새 축이다.
   채점 기준은 새로 만들지 않고 `question.answer_outline`을 쓴다 — 사용자가 결과 화면에서 본
   그 뼈대가 그대로 기준이다. **오디오는 저장하지 않는다**: STT는 브라우저(Web Speech API)
-  몫이고 서버는 텍스트만 받는다. 실측: 채점 1회 in=2,246 out=174 $0.0156 / 6.6초,
-  5문항 세션 $0.078
+  몫이고 서버는 텍스트만 받는다. 실측: 채점 1회 $0.0065(캐시 적중)·$0.0159(첫 호출),
+  5문항 세션 $0.042 — **프롬프트 캐싱으로 46% 절감**. 캐시는 채점에만 건다 (TTL 5분보다
+  뜸한 호출은 쓰기만 하고 읽기가 없어 오히려 비싸다)
 - 테스트 177개 전부 통과. `contextLoads()`가 Testcontainers로 실제 Postgres를 띄워
   **Flyway 마이그레이션·엔티티 매핑·JPQL을 매번 검증한다.**
   매핑 검증은 `spring.jpa.hibernate.ddl-auto=validate` 덕분이다 — 이 줄이 없으면 기본값이

@@ -4,15 +4,18 @@ import com.anthropic.client.AnthropicClient;
 import com.anthropic.errors.AnthropicIoException;
 import com.anthropic.errors.AnthropicServiceException;
 import com.anthropic.errors.RateLimitException;
+import com.anthropic.models.messages.CacheControlEphemeral;
 import com.anthropic.models.messages.MessageCreateParams;
 import com.anthropic.models.messages.StructuredMessage;
 import com.anthropic.models.messages.StructuredMessageCreateParams;
+import com.anthropic.models.messages.TextBlockParam;
 import com.anthropic.models.messages.ThinkingConfigAdaptive;
 import com.jobit.llm.LlmCallRecorder;
 import com.jobit.llm.LlmException;
 import com.jobit.llm.LlmFeature;
 import com.jobit.llm.LlmModelConfig;
 import com.jobit.llm.StructuredOutput;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -35,6 +38,25 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 @Slf4j
 public class AnthropicAnswerScorer implements AnswerScorer {
+
+	/**
+	 * 캐시 표시를 붙인 시스템 프롬프트.
+	 *
+	 * <p><b>이 기능에만 캐싱을 거는 이유.</b> 프롬프트 캐시는 프리픽스 일치이고 TTL 이 5분이라,
+	 * 호출이 5분보다 뜸하면 매번 쓰기(1.25배)만 하고 읽기가 없어 <b>오히려 비싸진다.</b>
+	 * JD 파싱과 질문 생성은 공고당 한 번이라 그 조건에 걸린다. 채점만 한 세션에서 문항 수만큼
+	 * 연달아 나가고, 간격도 답변 제한 시간(90초) + 채점(약 7초) 정도라 TTL 안에 들어온다.
+	 *
+	 * <p><b>TTL 을 1시간으로 올리지 않는다.</b> 그쪽은 쓰기가 2배인데 {@code LlmPricing} 의
+	 * {@code CACHE_WRITE_RATIO} 가 1.25(=5분)로 잡혀 있어, 바꾸면 비용 기록이 조용히 틀어진다.
+	 *
+	 * <p><b>정적 상수여야 한다.</b> 프리픽스가 한 바이트라도 달라지면 캐시가 무효화된다 —
+	 * 시각·요청 ID 같은 것을 프롬프트에 끼워 넣으면 캐시는 영원히 빗나가고 쓰기 비용만 낸다.
+	 */
+	private static final List<TextBlockParam> CACHED_SYSTEM = List.of(TextBlockParam.builder()
+		.text(AnswerScorePrompts.SYSTEM)
+		.cacheControl(CacheControlEphemeral.builder().build())
+		.build());
 
 	private final AnthropicClient client;
 
@@ -61,22 +83,34 @@ public class AnthropicAnswerScorer implements AnswerScorer {
 				response.feedback());
 	}
 
-	private AnswerScoreResponse call(Request request, LlmModelConfig.FeatureConfig config) {
+	/**
+	 * 요청 파라미터 조립.
+	 *
+	 * <p><b>테스트가 이걸 그대로 부를 수 있게 꺼내 두었다.</b> 테스트가 같은 조립을 복사해 두면
+	 * 프로덕션만 고쳤을 때 테스트는 옛 요청을 검사하며 통과한다 — 요청 형태를 고정하겠다는
+	 * 테스트가 정작 형태가 바뀐 것을 못 잡는다.
+	 */
+	static StructuredMessageCreateParams<AnswerScoreResponse> buildParams(Request request,
+			LlmModelConfig.FeatureConfig config) {
 		// effort는 StructuredOutput.withEffort로 건다 — outputConfig(Class)가 effort를
 		// 조용히 지우기 때문이다. 자세한 이유는 그쪽 주석 참고.
-		StructuredMessageCreateParams<AnswerScoreResponse> params = StructuredOutput.withEffort(
-				MessageCreateParams.builder()
-					.model(config.model())
-					.maxTokens(config.maxTokens())
-					// thinking을 끄지 않는다 — LlmModelConfig 주석 참고.
-					.thinking(ThinkingConfigAdaptive.builder().build())
-					.outputConfig(AnswerScoreResponse.class)
-					// 최초 시스템 프롬프트는 top-level system 이다 (AnthropicJdParser 주석 참고).
-					.system(AnswerScorePrompts.SYSTEM)
-					.addUserMessage(AnswerScorePrompts.userMessage(request.questionText(),
-							request.answerOutline(), request.requirementText(),
-							request.transcript())),
+		return StructuredOutput.withEffort(MessageCreateParams.builder()
+			.model(config.model())
+			.maxTokens(config.maxTokens())
+			// thinking을 끄지 않는다 — LlmModelConfig 주석 참고.
+			.thinking(ThinkingConfigAdaptive.builder().build())
+			.outputConfig(AnswerScoreResponse.class)
+			// 최초 시스템 프롬프트는 top-level system 이다 (AnthropicJdParser 주석 참고).
+			// **문자열 오버로드가 아니라 텍스트 블록으로 넣는다** — cache_control 을
+			// 실으려면 블록이어야 한다. 자세한 이유는 CACHED_SYSTEM 주석 참고.
+			.systemOfTextBlockParams(CACHED_SYSTEM)
+			.addUserMessage(AnswerScorePrompts.userMessage(request.questionText(),
+					request.answerOutline(), request.requirementText(), request.transcript())),
 				config.effort());
+	}
+
+	private AnswerScoreResponse call(Request request, LlmModelConfig.FeatureConfig config) {
+		StructuredMessageCreateParams<AnswerScoreResponse> params = buildParams(request, config);
 
 		long startedAt = System.nanoTime();
 		StructuredMessage<AnswerScoreResponse> message;
