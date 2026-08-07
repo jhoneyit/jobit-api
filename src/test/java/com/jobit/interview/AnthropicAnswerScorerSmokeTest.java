@@ -8,6 +8,7 @@ import com.anthropic.models.messages.Usage;
 import com.jobit.llm.LlmCallRecorder;
 import com.jobit.llm.LlmFeature;
 import java.time.Duration;
+import java.util.Collections;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -83,8 +84,11 @@ class AnthropicAnswerScorerSmokeTest {
 
 		// 구조: 정규화가 보장하는 성질. 느슨해지면 여기서 먼저 깨져야 한다.
 		assertThat(good.covered()).allSatisfy(i -> assertThat(i).isBetween(0, OUTLINE.size() - 1));
-		assertThat(good.covered()).as("covered 와 missed 는 겹치지 않는다")
-			.doesNotContainAnyElementsOf(good.missed());
+		// **Collections.disjoint 를 쓴다.** AssertJ 의 doesNotContainAnyElementsOf 는 빈 목록을
+		// 넘기면 예외를 던지는데, 모델이 뼈대를 전부 짚으면 missed 가 비어 정상 경로에서 터진다.
+		assertThat(Collections.disjoint(good.covered(), good.missed()))
+			.as("covered 와 missed 는 겹치지 않는다")
+			.isTrue();
 		assertThat(good.covered().size() + good.missed().size())
 			.as("둘을 합치면 뼈대 전체다")
 			.isEqualTo(OUTLINE.size());
