@@ -24,8 +24,10 @@ JD(채용공고) 기반 기술 면접 준비 + 이력서 첨삭 서비스의 **�
   **스키마 소유권은 이쪽 Flyway 단일이다** — 그쪽 `drizzle-kit` 은 마이그레이션에서 손을 뗐다.
   컬럼을 바꾸면 여기 마이그레이션을 추가하고 그쪽 `src/lib/db/schema.ts` 를 맞춘다.
 
-> **호출자 인증이 아직 없다.** `owner_key`만 알면 남의 이력을 읽을 수 있으므로
-> 이 서버를 공개망에 노출하면 안 된다 (`docs/architecture.md` 미결).
+> **`owner_key`에는 HMAC 서명이 붙는다** (2026-08-07, `common.ServiceAuth`). 프론트와 같은
+> 비밀키(`jobit.auth.service-secret` / `JOBIT_SERVICE_SECRET`)로 서명하며, `/api/*` 필터가
+> 검증한다. **비밀키가 없으면 인증이 꺼진다** — 로컬 전용이고, `prod` 프로파일에서는 앱이
+> 뜨지 않는다.
 
 ## 핵심 구조 (한 문단)
 
@@ -131,13 +133,23 @@ src/main/resources/
 
 ### 비밀값
 
-키 목록은 `.env.example` 참고. 실제 값은 커밋하지 않는다.
+키 목록은 `.env.example`, 실제 값은 `.env`(`.gitignore` 대상)에 넣는다.
 
-**`ANTHROPIC_API_KEY`는 OS 환경변수로 넣는다.** Anthropic Java SDK의
-`AnthropicOkHttpClient.fromEnv()`는 OS 환경변수만 읽는다 —
-`application-local.properties`나 `spring.config.import`로 로드한 값은 Spring Environment에만
-올라가므로 `fromEnv()`가 찾지 못한다. Spring 프로퍼티로 관리하려면 `@Value`로 주입해
-`AnthropicOkHttpClient.builder().apiKey(...)`를 직접 호출해야 한다.
+**`.env` 는 `application.properties` 의 `spring.config.import` 가 읽는다.** Spring Boot 가
+자동으로 읽어 주지 않으므로 그 줄이 없으면 파일을 만들어 둬도 조용히 무시된다 — 호출자 인증이
+꺼진 채로 뜨는 것이 그 결과였다. OS 환경변수가 `.env` 보다 우선한다.
+
+**LLM 키는 `.env` 에 `anthropic.api-key` 라는 이름으로 넣는다** — 이 파일에서 유일하게
+SHOUT_CASE 가 아니다. `AnthropicConfig` 의 `@ConditionalOnProperty("anthropic.api-key")` 가
+그 이름을 그대로 찾는데, `ANTHROPIC_API_KEY` → `anthropic.api-key` 완화 바인딩은
+**OS 환경변수 소스에만** 적용되고 properties 로 읽는 `.env` 에는 적용되지 않는다.
+SHOUT_CASE 로 적으면 조용히 무시되고 폴백이 자리를 지킨다.
+
+(`AnthropicOkHttpClient.fromEnv()` 는 쓰지 않는다. 그쪽이야말로 OS 환경변수만 읽는다 —
+`AnthropicConfig` 가 `@Value` 로 받아 `builder().apiKey(...)` 에 직접 넘긴다.)
+
+**스모크 테스트는 여전히 OS 환경변수를 본다.** `System.getenv` 를 직접 읽으므로 `.env` 에만
+넣으면 조용히 건너뛴다 — 돌릴 때만 `export ANTHROPIC_API_KEY=...` 한다.
 
 ## 문서
 
@@ -169,15 +181,29 @@ src/main/resources/
   `IncrementalArrayParser` 가 스트림에서 완성된 배열 원소를 골라낸다 (문자열 안의 중괄호·
   이스케이프에 속지 않는 상태 기계). `prompt_version` 이 같으면 재생성하지 않는다.
   실측: in=2,813 out=3,526 $0.102 / 62초, 두 번째 호출은 캐시로 0초
+- **`GET·DELETE /api/submissions` + `POST /api/submissions/claim` 동작** — 내 기록 목록·삭제·
+  익명 승계. 목록 한 줄에 붙는 집계 셋(요구사항 수·질문 수·갭 요약)을 **공고 ID를 한 번에 넘겨**
+  가져온다. 이걸로 프론트가 `jd_submission`을 직접 읽던 마지막 경로가 사라졌다
+  (관리자 콘솔은 여전히 DB를 직접 읽는다 — 운영용이라 대응 엔드포인트가 없다)
 - **LLM 연동** — Anthropic Java SDK, 구조화 출력 + 서버 재검증 + 3회 재시도, `llm_call_log` 비용 기록
 - 엔티티 + 리포지토리 전체 (`jd` / `question` / `resume` / `gap` / `submission` / `member` / `llm`)
-- Flyway V1~V5 — pgvector 확장, 코어 스키마, 로컬 가입 컬럼, `password_reset_token`,
-  `owner_key` 전환 + 유니크 제약
+- Flyway V1~V10 — pgvector 확장, 코어 스키마, 로컬 가입 컬럼, `password_reset_token`,
+  `owner_key` 전환, DB 단일화, 레이트 리밋, 프로필, 면접 연습(V9~V10)
 - 서비스: `JdParsingService`(캐시·경합 처리),
   `JdSubmissionService`(이력 목록 + 갭 요약, N+1 회피, 익명→계정 승계)
 - 미사용 서비스: `LocalAccountService`, `PasswordResetService`, `MemberService` — 인증이 프론트에 있다
-- 테스트 70개 전부 통과. `contextLoads()`가 Testcontainers로 실제 Postgres를 띄워
-  **Flyway 마이그레이션·엔티티 매핑·JPQL을 매번 검증한다** — 여기가 유일한 통합 검증 지점이다
+- **면접 연습 완료** (`docs/interview-practice-design.md`) — 백엔드 6종 + 프론트 화면
+  (`/interview`, `/profile/interviews`) + `transcript` TTL 정리까지. 스펙에 없는 새 축이다.
+  채점 기준은 새로 만들지 않고 `question.answer_outline`을 쓴다 — 사용자가 결과 화면에서 본
+  그 뼈대가 그대로 기준이다. **오디오는 저장하지 않는다**: STT는 브라우저(Web Speech API)
+  몫이고 서버는 텍스트만 받는다. 실측: 채점 1회 in=2,246 out=174 $0.0156 / 6.6초,
+  5문항 세션 $0.078
+- 테스트 177개 전부 통과. `contextLoads()`가 Testcontainers로 실제 Postgres를 띄워
+  **Flyway 마이그레이션·엔티티 매핑·JPQL을 매번 검증한다.**
+  매핑 검증은 `spring.jpa.hibernate.ddl-auto=validate` 덕분이다 — 이 줄이 없으면 기본값이
+  `none`이라(Testcontainers Postgres는 임베디드가 아니다) **컬럼명을 틀려도 컨텍스트는 뜬다.**
+  2026-08-07까지 실제로 그 상태였다. 저장·조회까지 보려면 별도 테스트가 필요하다
+  (`InterviewPersistenceTest`)
 
 없는 것 (= 다음 작업 후보):
 
@@ -195,6 +221,13 @@ src/main/resources/
 |---|---|---|
 | 소유자별 시간당 한도 | 한 사람의 폭주 | 20회 |
 | 전역 일일 비용 상한 | 여러 사람이 몰렸을 때의 총액 | $5.00 |
+| 면접 연습 일별 세션 | 세션 1건 = LLM N회인 유일한 기능 | 6세션 |
+
+**면접 연습만 세 번째 겹이 필요하다.** 다른 기능은 요청 1건 = LLM 1회지만 면접 연습은 세션 1건이
+문항 수만큼을 먹어서, 시간당 한도만으로는 세션 네 번에 소진되며 공고 분석까지 함께 막힌다.
+`calls-per-hour` 를 올려 해결하지 않는다 — 올리면 다른 기능 방어까지 헐거워진다.
+카운터는 `interview_session` 을 직접 센다 (`rate_limit_bucket` 은 창을 2시간 뒤 정리해서
+일별 창을 둘 수 없다).
 
 - **횟수만으로는 부족하다.** 기능마다 단가가 열 배씩 차이 난다 (파싱 $0.034 / 질문 생성 $0.102).
   그래서 총액은 `llm_call_log.cost_usd` 합계로 따로 막는다.
@@ -234,8 +267,10 @@ src/main/resources/
 
 ### 알려진 문제
 
-- **호출자 인증이 없다.** `owner_key`는 프론트가 HTTP로 넘기는 값이라, 지어내면 남의 이력을
-  읽을 수 있다. `OwnerKey.requireValid`는 형식만 본다. 공개망에 노출하지 말 것.
+- **비밀키 하나가 전부다.** `jobit.auth.service-secret`이 새면 모든 소유자를 사칭할 수 있다.
+  비대칭 키나 mTLS로 좁힐 수 있지만 과하다고 봤다. **키 회전 절차가 아직 없다** — 지금은
+  양쪽을 동시에 바꿔야 해서 무중단 회전이 안 된다.
+- **비밀키를 설정하지 않으면 인증이 꺼진 채로 뜬다.** 부팅 로그의 경고를 보고 알아채야 한다.
 - **테스트에 Docker가 필요하다.** `contextLoads()`가 Testcontainers로 Postgres를 띄운다.
   Docker가 없으면 이 테스트만 실패한다.
 

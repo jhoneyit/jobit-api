@@ -1,11 +1,16 @@
 package com.jobit.submission;
 
+import com.jobit.common.NotFoundException;
 import com.jobit.common.OwnerKey;
 import com.jobit.gap.GapItemRepository;
 import com.jobit.gap.GapSummary;
 import com.jobit.jd.JobPosting;
+import com.jobit.jd.RequirementRepository;
+import com.jobit.question.QuestionGenPrompts;
+import com.jobit.question.QuestionRepository;
 import com.jobit.resume.Resume;
 import com.jobit.resume.ResumeRepository;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -32,6 +37,10 @@ public class JdSubmissionService {
 
 	private final ResumeRepository resumeRepository;
 
+	private final RequirementRepository requirementRepository;
+
+	private final QuestionRepository questionRepository;
+
 	/**
 	 * 공고를 넣었음을 기록한다.
 	 *
@@ -51,9 +60,7 @@ public class JdSubmissionService {
 
 	@Transactional
 	public void updateMemo(UUID submissionId, String ownerKey, String memo) {
-		JdSubmission submission = submissionRepository.findByIdAndOwnerKey(submissionId, ownerKey)
-			.orElseThrow(() -> new IllegalArgumentException("submission not found: " + submissionId));
-		submission.changeMemo(memo);
+		getOwned(submissionId, ownerKey).changeMemo(memo);
 	}
 
 	/**
@@ -64,6 +71,7 @@ public class JdSubmissionService {
 	 * 이력서가 없으면 요약 없이 목록만 반환한다.
 	 *
 	 * <p>집계는 페이지에 실린 공고 ID를 한 번에 넘겨 한 방에 가져온다 — 줄마다 조회하면 N+1이다.
+	 * 목록 한 줄에 붙는 집계가 셋(요구사항 수·질문 수·갭 요약)이라, 20줄이면 60번이 된다.
 	 */
 	@Transactional(readOnly = true)
 	public Page<SubmissionListItem> list(String ownerKey, Pageable pageable) {
@@ -71,38 +79,74 @@ public class JdSubmissionService {
 
 		Page<JdSubmission> page = submissionRepository.findByOwner(ownerKey, pageable);
 		if (page.isEmpty()) {
-			return page.map(submission -> toItem(submission, Map.of()));
+			// in :ids 에 빈 목록을 넘기면 Hibernate 가 문법 오류를 내는 방언이 있다. 애초에 부를 이유도 없다.
+			return page.map(submission -> toItem(submission, Map.of(), Map.of(), Map.of()));
 		}
 
-		Map<UUID, GapSummary> summaries = summariesFor(ownerKey, page.getContent());
-		return page.map(submission -> toItem(submission, summaries));
+		List<UUID> jobPostingIds = page.getContent()
+			.stream()
+			.map(submission -> submission.getJobPosting().getId())
+			.toList();
+
+		Map<UUID, Long> requirementCounts = foldCounts(
+				requirementRepository.countByJobPosting(jobPostingIds));
+		Map<UUID, Long> questionCounts = foldCounts(questionRepository
+			.countByJobPosting(jobPostingIds, QuestionGenPrompts.PROMPT_VERSION));
+		Map<UUID, GapSummary> summaries = summariesFor(ownerKey, jobPostingIds);
+
+		return page.map(submission -> toItem(submission, requirementCounts, questionCounts,
+				summaries));
 	}
 
-	private Map<UUID, GapSummary> summariesFor(String ownerKey, List<JdSubmission> submissions) {
+	/** {@code (jobPostingId, count)} 행들을 맵으로. 행이 없는 공고는 호출부에서 0이 된다. */
+	private static Map<UUID, Long> foldCounts(List<Object[]> rows) {
+		Map<UUID, Long> counts = new LinkedHashMap<>();
+		for (Object[] row : rows) {
+			counts.put((UUID) row[0], (Long) row[1]);
+		}
+		return counts;
+	}
+
+	private Map<UUID, GapSummary> summariesFor(String ownerKey, List<UUID> jobPostingIds) {
 		List<Resume> resumes = resumeRepository.findByOwnerKeyOrderByCreatedAtDesc(ownerKey);
 		if (resumes.isEmpty()) {
 			return Map.of();
 		}
-
-		List<UUID> jobPostingIds = submissions.stream()
-			.map(submission -> submission.getJobPosting().getId())
-			.toList();
 		return GapSummary.fold(
 				gapItemRepository.countByStatus(resumes.getFirst().getId(), jobPostingIds));
 	}
 
-	private SubmissionListItem toItem(JdSubmission submission, Map<UUID, GapSummary> summaries) {
+	private SubmissionListItem toItem(JdSubmission submission, Map<UUID, Long> requirementCounts,
+			Map<UUID, Long> questionCounts, Map<UUID, GapSummary> summaries) {
 		JobPosting posting = submission.getJobPosting();
-		return new SubmissionListItem(submission.getId(), posting.getId(), posting.getCompany(),
-				posting.getTitle(), submission.getMemo(), submission.getUpdatedAt(),
-				summaries.get(posting.getId()));
+		UUID postingId = posting.getId();
+		return new SubmissionListItem(submission.getId(), postingId, posting.getCompany(),
+				posting.getTitle(), posting.getParsed(), submission.getMemo(),
+				requirementCounts.getOrDefault(postingId, 0L),
+				questionCounts.getOrDefault(postingId, 0L), submission.getUpdatedAt(),
+				summaries.get(postingId));
 	}
 
 	/** 상세 화면. 소유자가 아니면 비어 있다 — 남의 이력이 열려선 안 된다. */
 	@Transactional(readOnly = true)
 	public JdSubmission getOwned(UUID submissionId, String ownerKey) {
+		OwnerKey.requireValid(ownerKey);
 		return submissionRepository.findByIdAndOwnerKey(submissionId, ownerKey)
-			.orElseThrow(() -> new IllegalArgumentException("submission not found: " + submissionId));
+			.orElseThrow(() -> new NotFoundException("submission not found: " + submissionId));
+	}
+
+	/**
+	 * 이력 한 줄을 지운다.
+	 *
+	 * <p><b>{@code job_posting}은 건드리지 않는다.</b> 공고는 {@code content_hash} 기준 전역
+	 * 캐시라(스펙 §4.1) 한 사람이 목록에서 치웠다고 지우면 다른 사람의 캐시 적중까지 깨진다.
+	 *
+	 * <p>조회 조건에 {@code ownerKey}가 들어가므로 남의 ID를 넣으면 지워지지 않고 404다 —
+	 * 소유자를 따로 비교하지 않는다 (docs/api.md "소유자 검사").
+	 */
+	@Transactional
+	public void delete(UUID submissionId, String ownerKey) {
+		submissionRepository.delete(getOwned(submissionId, ownerKey));
 	}
 
 	/**

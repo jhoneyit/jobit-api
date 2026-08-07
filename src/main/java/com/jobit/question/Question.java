@@ -51,9 +51,17 @@ public class Question {
 	@JdbcTypeCode(SqlTypes.JSON)
 	private String followups;
 
-	/** 답변 뼈대 (핵심 포인트 목록). */
+	/**
+	 * 답변 뼈대 (핵심 포인트 목록).
+	 *
+	 * <p><b>null 이 아니다.</b> V6 이 NOT NULL + {@code DEFAULT '[]'} 로 바꿨다 — 비어 있을 수는
+	 * 있어도 없을 수는 없다. 선언에 {@code nullable} 이 빠져 있으면 매핑이 스키마보다 느슨해
+	 * 보이는데, {@code ddl-auto=validate} 는 nullable 을 검사하지 않아 그 어긋남이 드러나지 않는다.
+	 *
+	 * <p>이 값은 면접 연습의 <b>채점 기준</b>이기도 하다 (docs/interview-practice-design.md).
+	 */
 	@JdbcTypeCode(SqlTypes.JSON)
-	@Column(name = "answer_outline")
+	@Column(name = "answer_outline", nullable = false)
 	private String answerOutline;
 
 	/**

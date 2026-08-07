@@ -1,6 +1,5 @@
 package com.jobit.jd;
 
-import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
@@ -22,18 +21,20 @@ import org.springframework.context.annotation.Configuration;
 @Slf4j
 public class JdParserFallbackConfig {
 
+	/**
+	 * <b>경고를 빈 메서드 안에서 낸다.</b> 설정 클래스의 {@code @PostConstruct}에 두면 폴백이
+	 * 실제로 쓰이는지와 무관하게 <b>항상</b> 찍힌다 — 키를 제대로 넣어도 "구현이 없습니다"가
+	 * 뜨는 것이다. 늘 뜨는 경고는 곧 읽히지 않게 되고, 그러면 진짜로 폴백이 물린 날에도
+	 * 아무도 알아채지 못한다.
+	 */
 	@Bean
 	@ConditionalOnMissingBean(JdParser.class)
 	public JdParser unavailableJdParser() {
+		log.warn("JdParser 구현이 없습니다. JD 파싱을 호출하면 실패합니다 "
+				+ "(캐시 적중 시에는 파서를 타지 않으므로 정상 동작합니다).");
 		return rawText -> {
 			throw new JdParserNotConfiguredException();
 		};
-	}
-
-	@PostConstruct
-	void warn() {
-		log.warn("JdParser 구현이 없습니다. JD 파싱을 호출하면 실패합니다 "
-				+ "(캐시 적중 시에는 파서를 타지 않으므로 정상 동작합니다).");
 	}
 
 	public static class JdParserNotConfiguredException extends IllegalStateException {

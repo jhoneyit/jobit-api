@@ -2,7 +2,10 @@
 
 **이 문서가 `jobit-front`와의 계약 원본이다.** 엔드포인트를 바꾸면 여기부터 고치고 프론트를 맞춘다.
 
-구현 상태: `POST /api/jd/parse` ✅ / `GET /api/questions` (SSE) ✅ / `GET /api/stats/stacks` ✅
+구현 상태: `POST /api/jd/parse` ✅ / `GET /api/questions` (SSE) ✅ / `GET /api/stats/stacks` ✅ /
+`GET·DELETE /api/submissions` ✅ / `POST /api/submissions/claim` ✅ /
+면접 연습 6종 ✅ (`POST /api/interviews` · `.../answers` · `.../finish` ·
+`GET /api/interviews` · `GET·DELETE /api/interviews/{id}` · `POST /api/interviews/claim`)
 
 ## 공통 규약
 
@@ -21,11 +24,21 @@
   컨트롤러 진입점에서 `OwnerKey.requireValid`로 형식을 검증한다. 접두사 없는 값을 통과시키면
   조회가 조용히 0건을 반환해 규약 위반이 드러나지 않는다.
 
-  > ⚠️ **형식 검증은 사칭을 막지 못한다.** 호출자 인증(서비스 토큰 등)은 아직 **미정**이며,
-  > 그때까지 이 서버를 공개망에 노출하면 안 된다 (`architecture.md` 미결).
+  **형식 검증만으로는 사칭을 막지 못하므로 이 값에 서명을 요구한다** (2026-08-07):
+
+  ```
+  X-Owner-Auth: v1.<만료 epoch 초>.<base64url HMAC-SHA256>
+  ```
+
+  서명 대상은 `"v1." + owner_key + "." + exp` 다. `owner_key` 와 만료가 서명 안에 들어 있어
+  헤더만 바꿔치기하거나 만료를 늘릴 수 없다. **`owner_key` 가 없는 요청(공개 통계)도 서명한다** —
+  예외를 두면 그 경로가 뒷문이 된다. 실패는 이유를 구분하지 않고 `401` 이다.
+
+  비밀키는 두 레포가 같은 값을 쓴다 (`jobit.auth.service-secret` / `JOBIT_SERVICE_SECRET`).
+  자세한 근거는 `architecture.md` "호출자 인증".
 - **레이트 리밋**: 세션당 LLM 호출 횟수 제한 (스펙 §6). 초과 시 `429` + `Retry-After` 헤더(초).
   **캐시로 처리되는 요청은 한도를 소비하지 않는다** — LLM을 부르지 않았기 때문이다.
-- 상태 코드: `400` 입력 오류 / `401` 인증 / `403` 소유자 불일치 / `404` 없음 /
+- 상태 코드: `400` 입력 오류 / `401` 호출자 인증 실패 / `403` 미사용 / `404` 없음 /
   `429` 한도 초과 / `502` LLM 장애 / `500` 그 외.
 
 ### 소유자 검사
@@ -103,6 +116,357 @@ LLM 호출 한 번이 낭비되지만 락을 잡는 것보다 낫다.
 
 ---
 
+### `GET /api/submissions` — 입력 이력 목록 (스펙 §3.6, §4.6) ✅
+
+`X-Owner-Key`의 이력을 최근순으로 준다. **`X-Owner-Key`는 여기서 필수다** — 개인 자산이므로
+소유자 없이 조회할 대상이 없다. 없거나 형식이 틀리면 `400`이며, 빈 목록으로 얼버무리지 않는다.
+
+**요청**
+
+```
+GET /api/submissions?page=0&size=20
+헤더: X-Owner-Key (필수)
+```
+
+`size`는 1~100으로 잘린다. 화면이 페이지를 쓰지 않더라도 목록은 언젠가 길어지므로 계약에 둔다.
+
+**응답 `200`**
+
+```jsonc
+{
+  "items": [
+    {
+      "submissionId": "uuid",       // 삭제 대상 식별자. jobPostingId 가 아니다 (아래 참고)
+      "jobPostingId": "uuid",       // 결과 화면 링크용
+      "company": "토스",             // 공고에 없으면 null
+      "title": "백엔드 개발자",       // 공고에 없으면 null
+      "parsed": { ... },            // 스택·도메인 등. /api/jd/parse 의 parsed 와 같은 객체
+      "memo": null,                 // 사용자 메모
+      "requirementCount": 12,
+      "questionCount": 10,          // 아직 생성 전이면 0
+      "updatedAt": "2026-08-07T09:12:33Z",
+      "gapSummary": null            // 갭 분석 전이면 null (0/0/0 으로 채우지 않는다)
+    }
+  ],
+  "page": 0,
+  "size": 20,
+  "totalElements": 3,
+  "totalPages": 1
+}
+```
+
+**`gapSummary`가 `null`인 것과 `0/0/0`인 것은 다르다.** 전자는 "아직 분석하지 않음",
+후자는 "분석했는데 요구사항이 없음"이다. 화면이 이 둘을 구분해야 하므로 채워서 내리지 않는다.
+요약 기준은 **가장 최근 이력서 하나**다 (이력서가 없으면 전부 `null`).
+
+**`updatedAt`은 제출 시각이 아니라 마지막으로 넣은 시각이다.** 같은 공고를 다시 넣으면 줄을
+새로 만들지 않고 이 값만 갱신한다 (스펙 §3.6) — 목록에 같은 공고가 여러 번 뜨지 않게 하려는
+것이고, 대신 "몇 번 넣었는지"는 남지 않는다.
+
+**에러**: `400` `X-Owner-Key` 누락·형식 위반.
+
+---
+
+### `DELETE /api/submissions/{submissionId}` — 이력 한 줄 삭제 ✅
+
+**지우는 것은 `jd_submission` 한 줄뿐이고 `job_posting`은 남긴다.** 공고는 `content_hash`
+기준 전역 캐시라(§4.1) 한 사람이 목록에서 치웠다고 지우면 다른 사람의 캐시 적중까지 깨진다.
+
+```
+DELETE /api/submissions/{submissionId}
+헤더: X-Owner-Key (필수)
+→ 204 No Content
+```
+
+**`jobPostingId`가 아니라 `submissionId`로 지운다.** 같은 공고를 여러 사람이 갖고 있으므로
+공고 ID는 이 목록에서 한 줄을 지목하지 못한다 — 소유자까지 함께 봐야 비로소 한 줄이 정해진다.
+목록이 `submissionId`를 내려주는 이유가 이것이다.
+
+**에러**
+
+| 상태 | 상황 |
+| --- | --- |
+| `400` | `X-Owner-Key` 누락·형식 위반, `submissionId`가 UUID가 아님 |
+| `404` | 없거나 **내 것이 아님** |
+
+**남의 이력은 `403`이 아니라 `404`다.** `403`은 "그 자원이 존재한다"를 알려주는 것이라,
+ID를 넣어 보는 것만으로 남의 이력 존재 여부를 훑을 수 있다 (위 "소유자 검사").
+
+---
+
+### `POST /api/submissions/claim` — 익명 이력을 계정으로 승계 (스펙 §3.6) ✅
+
+로그인 직후 프론트가 한 번 부른다. 이게 없으면 "질문 만들어 보고 마음에 들어서 로그인했더니
+방금 만든 게 사라진" 상태가 된다.
+
+```jsonc
+// 헤더: X-Owner-Key — 받는 쪽. user: 여야 한다
+{ "fromOwnerKey": "anon:<세션 쿠키>" }   // 넘겨줄 쪽. anon: 여야 한다
+```
+
+**응답 `200`**
+
+```jsonc
+{ "moved": 3 }   // 실제로 옮겨진 줄 수. 화면의 "기록 3건을 옮겼습니다" 문구가 이 값을 쓴다
+```
+
+**양쪽에 같은 공고가 있으면 익명 쪽을 버린다.** 익명일 때와 로그인 후에 같은 공고를 넣었으면
+줄이 둘인데, 그대로 소유자만 바꾸면 `(owner_key, job_posting_id)` 유니크 제약에 걸려 승계
+전체가 실패한다. 버려진 줄은 `moved`에 세지 않는다.
+
+**방향을 강제한다**: `from`은 `anon:`, `X-Owner-Key`는 `user:`여야 한다. 반대 방향을 허용하면
+계정 기록을 익명 키로 빼내는 경로가 생긴다. 위반은 `400`이다.
+
+> ⚠️ **서명은 `X-Owner-Key`(받는 쪽)만 보증한다.** `fromOwnerKey` 는 본문이라 서명 대상이
+> 아니다 — 프론트를 통과할 수 있는 호출자라면 남의 익명 세션 쿠키를 알 때 그 기록을 가져올 수
+> 있다. 익명 키는 프론트가 쿠키에서 직접 읽어 넘기므로 실제로 알아내기는 어렵지만,
+> 구조적으로 남아 있는 구멍이다.
+
+---
+
+## 면접 연습 (docs/interview-practice-design.md)
+
+**오디오를 받지 않는다.** STT는 브라우저(Web Speech API)가 하고 이 서버로는 텍스트만 온다.
+멀티파트도 업로드 상한도 없다 — 이 기능의 개인정보 대책이 사실상 이 한 줄이다.
+
+모두 `X-Owner-Key` 필수. 에러 형태·404 규칙은 `/api/submissions`와 같다.
+
+### `POST /api/interviews` — 세션 시작 ✅
+
+```jsonc
+{ "jobPostingId": "uuid" }
+```
+
+**응답 `200`**
+
+```jsonc
+{
+  "sessionId": "uuid",
+  "jobPostingId": "uuid",
+  "questionCount": 5,
+  "questions": [
+    { "questionId": "uuid", "text": "트랜잭션 격리 수준을…",
+      "category": "CS", "difficulty": 3, "timeLimitSec": 90 }
+  ]
+}
+```
+
+**`answer_outline`(답변 뼈대)이 응답에 없다.** 보고 답하면 연습이 아니다 — 뼈대는 채점 응답에서
+처음 나온다.
+
+**`questionCount`가 설정값(`questions-per-session`)보다 작을 수 있다.** 뼈대가 없는 질문은
+채점 기준이 없어 건너뛴다. 그런 문항을 넣으면 총점의 분모에는 들어가면서 절대 점수를 얻지 못해
+총점이 부당하게 깎인다.
+
+**에러**
+
+| 상태 | 상황 |
+| --- | --- |
+| `400` | `jobPostingId` 누락, **이 공고의 질문이 아직 없음** (`"이 공고의 예상 질문을 먼저 만들어 주세요."`) |
+| `404` | 공고 없음 |
+| `429` | 일별 세션 상한 (`"오늘 면접 연습 횟수를 모두 사용했습니다…"`) |
+
+> **질문이 있는 공고에서만 시작할 수 있다.** 제약이 아니라 진입점이다 — 채점 기준이 질문 생성의
+> 산물이므로, 프론트는 "내 기록"에서 질문이 만들어진 공고를 고르게 한다.
+
+---
+
+### `POST /api/interviews/{sessionId}/answers` — 답변 제출 + 즉시 채점 ✅
+
+```jsonc
+{
+  "questionId": "uuid",
+  "transcript": "격리 수준은 네 가지가 있고요…",  // 시간 내 답하지 못했으면 null 또는 ""
+  "durationMs": 42000
+}
+```
+
+**응답 `200`**
+
+```jsonc
+{
+  "questionId": "uuid",
+  "answered": true,
+  "score": 62,
+  "outline": ["격리 수준 4가지", "이상 현상", "DBMS별 기본값", "실무 선택 기준"],
+  "covered": [0, 1, 2],      // outline 인덱스
+  "missed": [3],
+  "feedback": "네 가지 수준을 정확히 나열하고…",
+  "answeredCount": 3,
+  "questionCount": 5
+}
+```
+
+**`covered`와 `missed`는 겹치지 않고, 합치면 항상 `outline` 전체다.** 서버가 `covered`의
+여집합으로 `missed`를 계산하므로 이 성질이 계산에서 따라 나온다 — 화면은 이걸 믿고 뼈대 옆에
+✅/❌를 붙이면 된다.
+
+**`transcript`가 비어 있는 것은 오류가 아니다.** 제한 시간 안에 한마디도 못 한 경우가 정상
+경로이고 그 자체가 결과다. `answered: false`, `score: 0`, `covered: []`로 기록되며
+**LLM을 부르지 않고 한도도 소비하지 않는다** — 마이크가 안 잡힌 사용자가 자기 한도를 스스로
+태우면 안 된다.
+
+**같은 질문에 다시 제출하면 덮어쓴다.** 마이크가 안 잡혔을 때의 재시도 경로다. 이전 채점 결과는
+함께 지워진다 — 답이 바뀌었는데 점수만 남으면 둘이 어긋난다. `answeredCount`는 늘지 않는다.
+
+**에러**
+
+| 상태 | 상황 |
+| --- | --- |
+| `400` | `questionId` 누락, `transcript` 10,000자 초과, **이미 종료된 세션** |
+| `404` | 세션이 없거나 **내 것이 아님**, 이 세션에 출제되지 않은 질문 |
+| `429` | LLM 호출 한도 (`Retry-After` 포함) 또는 전역 일일 비용 상한 |
+| `500` | `ANTHROPIC_API_KEY` 미설정 (`"답변 채점 기능이 아직 설정되지 않았습니다."`) |
+
+---
+
+### `POST /api/interviews/{sessionId}/finish` — 종료 · 총점 확정 ✅
+
+본문 없음.
+
+**응답 `200`**
+
+```jsonc
+{
+  "sessionId": "uuid",
+  "totalScore": 46,
+  "answeredCount": 3,
+  "questionCount": 5,
+  "finishedAt": "2026-08-07T10:22:11Z"
+}
+```
+
+**총점은 출제된 전 문항의 평균이다.** 답한 것만 평균 내면 한 문항만 답하고 나가는 쪽이
+유리해지므로, **미답변은 0점으로 센다.**
+
+**멱등이다.** 이미 닫힌 세션에 다시 불러도 같은 결과를 준다 — 마지막 문항 제출과 종료가
+겹치거나 사용자가 새로고침하는 것은 정상 경로라 오류로 만들 이유가 없다.
+
+**에러**: `404` 세션이 없거나 내 것이 아님.
+
+---
+
+### `GET /api/interviews` — 내 면접 기록 목록 ✅
+
+```
+GET /api/interviews?page=0&size=20
+헤더: X-Owner-Key (필수)
+```
+
+**응답 `200`**
+
+```jsonc
+{
+  "items": [
+    {
+      "sessionId": "uuid",
+      "jobPostingId": "uuid",
+      "company": "토스",
+      "title": "백엔드 개발자",
+      "totalScore": 72,        // 종료 전이면 null
+      "answeredCount": 4,
+      "questionCount": 5,
+      "startedAt": "2026-08-07T09:30:00Z",
+      "finishedAt": "2026-08-07T09:42:11Z"   // null이면 중간에 이탈했거나 진행 중
+    }
+  ],
+  "page": 0, "size": 20, "totalElements": 3, "totalPages": 1
+}
+```
+
+**`totalScore`가 `null`인 것과 `0`인 것은 다르다.** 전자는 "아직 안 끝냈다", 후자는 "끝냈는데
+한 문항도 못 짚었다"이다. 제출 이력의 `gapSummary`와 같은 규약이다.
+
+**집계 쿼리가 없다.** 총점·답변 수가 이미 세션 행에 있어 한 번의 조회로 끝난다 —
+`/api/submissions`가 세 종류의 집계를 배치로 모으는 것과 대조적이다.
+
+---
+
+### `GET /api/interviews/{sessionId}` — 세션 상세 ✅
+
+**응답 `200`** (목록 필드 + `questions` + `answers`)
+
+```jsonc
+{
+  "sessionId": "uuid", "company": "토스", "totalScore": 72, …,
+
+  // 이 세션에 출제된 문항. **답변 뼈대가 없다** — 뼈대는 아래 answers 안에만 있다.
+  // 연습 화면이 새로고침·새 탭에서 이어서 하려면 이 목록이 필요하다.
+  "questions": [
+    { "questionId": "uuid", "text": "…", "category": "CS",
+      "difficulty": 3, "timeLimitSec": 90 }
+  ],
+
+  "answers": [
+    {
+      "questionId": "uuid",
+      "questionText": "Kafka consumer에서 중복 처리와 순서 보장을…",
+      "category": "DESIGN",
+      "difficulty": 4,
+      "answered": true,
+      "transcript": "네 카프카에서 중복 처리랑…",   // null 일 수 있다 (아래)
+      "score": 52,
+      "outline": ["consumer 멱등성 확보 수단…", "at-least-once 전제와…"],
+      "covered": [0, 3],
+      "missed": [1, 2],
+      "feedback": "파티션 키를 통한 순서 보장과…",
+      "durationMs": 47000,
+      "timeLimitSec": 90
+    }
+  ]
+}
+```
+
+**`transcript`가 `null`인 경우가 둘이고, `answered`가 그 둘을 가른다.**
+
+| `answered` | `transcript` | 뜻 |
+| --- | --- | --- |
+| `false` | `null` | 제한 시간 안에 답하지 못했다 |
+| `true` | `null` | **TTL이 지나 발화 원문만 지웠다.** 점수·피드백은 남는다 |
+| `true` | 있음 | 정상 |
+
+> `answered`는 **저장된 컬럼이지 `transcript`에서 파생된 값이 아니다.** 파생시키면 원문을
+> 지우는 순간 점수를 받은 답변이 무응답으로 바뀐다 — 개인정보 삭제는 내용을 지우는 것이지
+> 사실을 지우는 것이 아니다 (V10).
+
+**`timeLimitSec`은 그때의 값이다.** 설정을 바꿔도 과거 기록의 의미가 변하지 않는다.
+
+**에러**: `404` 없거나 내 것이 아님.
+
+---
+
+### `DELETE /api/interviews/{sessionId}` — 기록 삭제 ✅
+
+```
+→ 204 No Content
+```
+
+**답변은 함께 지워지고 질문·공고는 남는다.** 둘 다 공유 자산이고, 특히 공고는 `content_hash`
+전역 캐시라 지우면 남의 캐시 적중까지 깨진다.
+
+**에러**: `404` 없거나 내 것이 아님.
+
+---
+
+### `POST /api/interviews/claim` — 익명 연습 기록을 계정으로 승계 ✅
+
+```jsonc
+// 헤더: X-Owner-Key — 받는 쪽. user: 여야 한다
+{ "fromOwnerKey": "anon:<세션 쿠키>" }
+```
+
+**응답 `200`**: `{ "moved": 2 }`
+
+`/api/submissions/claim`과 같은 규약이고 방향도 같이 강제한다. **엔드포인트를 따로 두는 이유는
+자원이 다르기 때문**이고, 프론트는 로그인 직후 제출 이력·프로필과 함께 이것도 부른다
+(이미 두 개를 따로 부르고 있다).
+
+**제출 이력과 달리 충돌 처리가 없다.** 그쪽은 `(owner_key, job_posting_id)` 유니크 제약 때문에
+양쪽에 같은 공고가 있으면 익명 쪽을 버려야 하지만, 세션은 같은 공고로 몇 번이든 연습할 수 있어
+제약 자체가 없다.
+
+---
+
 ## 이관 대상 — 아직 `jobit-front`에 있는 구현
 
 옮길 때 이 계약을 유지하면 프론트 호출부 변경이 최소화된다.
@@ -146,6 +510,7 @@ LLM 호출 한 번이 낭비되지만 락을 잡는 것보다 낫다.
 로드맵 3단계 이후(스펙 §5). 해당 단계에 들어갈 때 여기에 적는다.
 
 - 이력서 업로드 · bullet 분해 (§3.3) — 개인정보라 암호화·TTL 결정이 선행되어야 한다
-- 갭 분석 (§4.3) · 리라이트 (§4.4)
-- 회원 · 입력 이력 조회 (§4.6) — `JdSubmissionService`는 이미 구현되어 있다
+- 갭 분석 (§4.3) · 리라이트 (§4.4). 목록의 `gapSummary`가 채워지는 것도 이때다
+- 이력 **상세**·메모 수정 — `JdSubmissionService.getOwned`/`updateMemo`는 있고 경로가 없다.
+  화면(§4.6)이 아직 목록만 쓰므로 계약을 먼저 만들지 않았다
 - 인증 경로 (가입 · 로그인 · 비밀번호 재설정) — 서비스는 구현되어 있고 컨트롤러만 없다
