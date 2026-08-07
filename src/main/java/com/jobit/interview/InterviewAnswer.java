@@ -47,9 +47,27 @@ public class InterviewAnswer {
 	@Column(name = "sort_order", nullable = false)
 	private short sortOrder;
 
-	/** STT 결과. <b>null 은 "시간 내에 답하지 못했다"는 정상 경로다</b> — 그 자체가 결과다. */
+	/**
+	 * STT 결과. <b>null 은 두 가지 뜻이다</b> — {@link #answered}가 그 둘을 가른다.
+	 *
+	 * <ul>
+	 *   <li>{@code answered=false} → 제한 시간 안에 답하지 못했다 (정상 경로다)
+	 *   <li>{@code answered=true} → TTL 이 지나 원문만 지웠다 ({@link #forgetTranscript})
+	 * </ul>
+	 */
 	@Column(name = "transcript")
 	private String transcript;
+
+	/**
+	 * 답했는가.
+	 *
+	 * <p><b>{@code transcript != null} 로 대신할 수 없다.</b> 그러면 TTL 이 원문을 지우는 순간
+	 * 80점을 받은 답변이 "무응답"으로 바뀐다. 개인정보 삭제의 취지는 <b>내용을 지우는 것이지
+	 * 사실을 지우는 것이 아니다</b> — 점수·피드백을 남기기로 한 것과 같은 이유로 이것도 남는다.
+	 * V10 에서 컬럼을 추가했다.
+	 */
+	@Column(name = "answered", nullable = false)
+	private boolean answered;
 
 	@Column(name = "duration_ms", nullable = false)
 	private int durationMs;
@@ -118,9 +136,9 @@ public class InterviewAnswer {
 		replaceTranscript(transcript);
 	}
 
-	/** 답했는가. 공백만 말한 경우도 답하지 않은 것으로 본다. */
+	/** 답했는가. 공백만 말한 경우도 답하지 않은 것으로 본다. 원문이 지워져도 이 값은 남는다. */
 	public boolean answered() {
-		return transcript != null;
+		return answered;
 	}
 
 	public boolean scored() {
@@ -175,13 +193,24 @@ public class InterviewAnswer {
 		this.scoredAt = at;
 	}
 
-	/** TTL 만료 시 발화 원문만 지운다. 점수와 피드백은 남는다. */
+	/**
+	 * TTL 만료 시 발화 원문만 지운다.
+	 *
+	 * <p><b>{@link #answered}는 건드리지 않는다.</b> 점수·피드백을 남기는 것과 같은 이유다 —
+	 * 지우는 것은 내용이지 "답했다"는 사실이 아니다.
+	 */
 	void forgetTranscript() {
 		this.transcript = null;
 	}
 
-	/** 공백만 들어온 것은 답하지 않은 것으로 본다 — 빈 문자열을 채점에 태우면 안 된다. */
+	/**
+	 * 공백만 들어온 것은 답하지 않은 것으로 본다 — 빈 문자열을 채점에 태우면 안 된다.
+	 *
+	 * <p>{@link #answered}를 여기서 함께 정한다. 원문과 이 플래그가 갈라지는 곳은
+	 * {@link #forgetTranscript} 한 군데뿐이어야 한다.
+	 */
 	private void replaceTranscript(String transcript) {
 		this.transcript = (transcript == null || transcript.isBlank()) ? null : transcript.strip();
+		this.answered = this.transcript != null;
 	}
 }
