@@ -3,7 +3,9 @@ package com.jobit.common;
 import com.jobit.interview.AnswerScorerFallbackConfig.AnswerScorerNotConfiguredException;
 import com.jobit.interview.InterviewService;
 import com.jobit.jd.JdParserFallbackConfig.JdParserNotConfiguredException;
+import com.jobit.llm.EmbeddingClientFallbackConfig.EmbeddingNotConfiguredException;
 import com.jobit.llm.LlmException;
+import com.jobit.resume.ResumeParserFallbackConfig.ResumeParserNotConfiguredException;
 import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
 import com.jobit.llm.LlmGuard;
@@ -95,6 +97,44 @@ public class ApiExceptionHandler {
 			JdParserNotConfiguredException ex) {
 		log.error("JdParser 구현이 없습니다. ANTHROPIC_API_KEY 설정을 확인하세요.", ex);
 		return body(HttpStatus.INTERNAL_SERVER_ERROR, "공고 분석 기능이 아직 설정되지 않았습니다.");
+	}
+
+	/**
+	 * 이력서 분해 구현이 없는 상태. 위와 같은 이유로 5xx다.
+	 */
+	@ExceptionHandler(ResumeParserNotConfiguredException.class)
+	public ResponseEntity<Map<String, String>> handleResumeParserMissing(
+			ResumeParserNotConfiguredException ex) {
+		log.error("ResumeParser 구현이 없습니다. ANTHROPIC_API_KEY 설정을 확인하세요.", ex);
+		return body(HttpStatus.INTERNAL_SERVER_ERROR, "이력서 분석 기능이 아직 설정되지 않았습니다.");
+	}
+
+	/**
+	 * 임베딩 구현이 없는 상태.
+	 *
+	 * <p>문구가 위와 같다. <b>사용자에게 "임베딩"이라는 말은 아무 의미가 없고</b>, 어느 제공자의
+	 * 키가 빠졌는지는 운영자가 로그에서 볼 일이다. 다른 키를 요구한다는 사실은 화면이 아니라
+	 * 로그로 구분한다.
+	 */
+	@ExceptionHandler(EmbeddingNotConfiguredException.class)
+	public ResponseEntity<Map<String, String>> handleEmbeddingMissing(
+			EmbeddingNotConfiguredException ex) {
+		log.error("EmbeddingClient 구현이 없습니다. openai.api-key 설정을 확인하세요.", ex);
+		return body(HttpStatus.INTERNAL_SERVER_ERROR, "이력서 분석 기능이 아직 설정되지 않았습니다.");
+	}
+
+	/**
+	 * 이력서 암호화 키가 없는 상태.
+	 *
+	 * <p><b>평문 저장으로 폴백하지 않는다</b>는 결정이 여기서 사용자에게 드러난다 —
+	 * 업로드가 실패하는 편이, 나중에 되돌릴 수 없는 평문이 쌓이는 것보다 낫다
+	 * ({@link TextCipher} 주석 참고).
+	 */
+	@ExceptionHandler(TextCipher.NotConfiguredException.class)
+	public ResponseEntity<Map<String, String>> handleCipherMissing(
+			TextCipher.NotConfiguredException ex) {
+		log.error("이력서 암호화 키가 없습니다. jobit.resume.encryption-key 설정을 확인하세요.", ex);
+		return body(HttpStatus.INTERNAL_SERVER_ERROR, "이력서 분석 기능이 아직 설정되지 않았습니다.");
 	}
 
 	/** 채점 구현이 없는 상태. 위와 같은 이유로 5xx다 — 재시도해도 소용없다. */
