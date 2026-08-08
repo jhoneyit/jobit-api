@@ -139,11 +139,21 @@ src/main/resources/
 자동으로 읽어 주지 않으므로 그 줄이 없으면 파일을 만들어 둬도 조용히 무시된다 — 호출자 인증이
 꺼진 채로 뜨는 것이 그 결과였다. OS 환경변수가 `.env` 보다 우선한다.
 
-**LLM 키는 `.env` 에 `anthropic.api-key` 라는 이름으로 넣는다** — 이 파일에서 유일하게
-SHOUT_CASE 가 아니다. `AnthropicConfig` 의 `@ConditionalOnProperty("anthropic.api-key")` 가
-그 이름을 그대로 찾는데, `ANTHROPIC_API_KEY` → `anthropic.api-key` 완화 바인딩은
-**OS 환경변수 소스에만** 적용되고 properties 로 읽는 `.env` 에는 적용되지 않는다.
-SHOUT_CASE 로 적으면 조용히 무시되고 폴백이 자리를 지킨다.
+**LLM 키 둘은 `.env` 에 소문자 프로퍼티 이름으로 넣는다** — `anthropic.api-key` 와
+`openai.api-key` 다. 이 파일에서 이 둘만 SHOUT_CASE 가 아니다.
+`@ConditionalOnProperty("anthropic.api-key")` 가 그 이름을 그대로 찾는데,
+`ANTHROPIC_API_KEY` → `anthropic.api-key` 완화 바인딩은 **OS 환경변수 소스에만** 적용되고
+properties 로 읽는 `.env` 에는 적용되지 않는다. SHOUT_CASE 로 적으면 조용히 무시되고 폴백이
+자리를 지킨다.
+
+**`application.properties` 에 `openai.api-key=${OPENAI_API_KEY:}` 같은 다리를 놓지 않는다.**
+`@ConditionalOnProperty` 는 값이 **빈 문자열이어도 "있음"으로 판정**하므로, 그 줄을 넣으면
+키가 없을 때도 빈이 등록되어 폴백이 물러난다. 부팅은 멀쩡한데 이력서 업로드만 401 로 죽는다.
+(`jobit.auth.service-secret` 과 `jobit.resume.encryption-key` 는 `@Value` 로 받아 직접
+빈 값을 검사하므로 다리를 놓아도 된다 — 조건이 붙은 쪽만 문제다.)
+
+**`JOBIT_RESUME_KEY` 는 SHOUT_CASE 다** (`application.properties` 가 다리를 놓는다).
+없으면 이력서 업로드가 거부되고, `prod` 에서는 앱이 뜨지 않는다.
 
 (`AnthropicOkHttpClient.fromEnv()` 는 쓰지 않는다. 그쪽이야말로 OS 환경변수만 읽는다 —
 `AnthropicConfig` 가 `@Value` 로 받아 `builder().apiKey(...)` 에 직접 넘긴다.)
@@ -199,7 +209,25 @@ SHOUT_CASE 로 적으면 조용히 무시되고 폴백이 자리를 지킨다.
   몫이고 서버는 텍스트만 받는다. 실측: 채점 1회 $0.0065(캐시 적중)·$0.0159(첫 호출),
   5문항 세션 $0.042 — **프롬프트 캐싱으로 46% 절감**. 캐시는 채점에만 건다 (TTL 5분보다
   뜸한 호출은 쓰기만 하고 읽기가 없어 오히려 비싸다)
-- 테스트 177개 전부 통과. `contextLoads()`가 Testcontainers로 실제 Postgres를 띄워
+- **이력서 업로드 완료** (2026-08-09, docs/api.md "이력서") — 텍스트 업로드 → LLM 문장 분해 →
+  임베딩 → 저장까지 한 경로. 엔드포인트 5종. **여기서 pgvector가 처음 실제로 쓰인다.**
+  - **원문은 AES-256-GCM 으로 암호화 저장한다** (`common.TextCipher`). 키가 없으면 평문으로
+    폴백하지 않고 **업로드를 거부한다** — 인증과 반대 결정이고, 평문 이력서는 되돌릴 수 없어서다
+  - **임베딩만 제공자가 다르다.** Anthropic은 임베딩 API가 없어 OpenAI
+    `text-embedding-3-small`(1536차원)을 쓴다. 스키마의 `vector(1536)`이 그 값이라 마이그레이션이
+    필요 없었다. SDK 없이 `RestClient` 로 직접 부른다 — 엔드포인트가 하나뿐이다
+  - **LLM 호출을 트랜잭션 밖에 뒀다.** `JdParsingService`와 다른데, 분해가 수십 초라 그동안
+    커넥션을 붙들면 동시 업로드 몇 건에 풀이 마르고 무관한 기능까지 멈춘다. 임베딩까지 끝낸 뒤
+    `TransactionTemplate`으로 짧은 쓰기 트랜잭션만 연다
+  - **문장 순서와 벡터 순서가 어긋나면 저장하지 않는다.** 밀린 인덱스는 결과가 그럴듯해서
+    사후에 가장 찾기 어렵다 (`OpenAiEmbeddingClient`는 응답을 `index`로 재정렬까지 한다)
+  - 90일 TTL + `ResumeCleanup`. 면접 답변과 달리 **행을 통째로 지운다** — 이력서는 문장 자체가
+    내용의 전부라 원문을 지우고 남길 것이 없다
+- 테스트 239개 전부 통과 (스모크 4개는 스위치가 없어 건너뜀).
+  `ResumeEmbeddingPersistenceTest`가 **pgvector 경로를 실제 Postgres로 검증한다** —
+  `::vector` 캐스트·`<=>` 연산자·리터럴 형식·차원 수는 넷 다 컴파일러가 봐주지 않고,
+  셋은 예외조차 없이 그냥 틀린 순서를 돌려준다.
+  `contextLoads()`가 Testcontainers로 실제 Postgres를 띄워
   **Flyway 마이그레이션·엔티티 매핑·JPQL을 매번 검증한다.**
   매핑 검증은 `spring.jpa.hibernate.ddl-auto=validate` 덕분이다 — 이 줄이 없으면 기본값이
   `none`이라(Testcontainers Postgres는 임베디드가 아니다) **컬럼명을 틀려도 컨텍스트는 뜬다.**
@@ -208,11 +236,20 @@ SHOUT_CASE 로 적으면 조용히 무시되고 폴백이 자리를 지킨다.
 
 없는 것 (= 다음 작업 후보):
 
-- 제출 이력 조회·삭제 엔드포인트 — `JdSubmissionService` 는 있고 컨트롤러가 없다.
-  그동안 프론트가 DB 를 직접 읽고 있다
-- 갭 분석·리라이트 (3~4단계)
-- pgvector Hibernate 타입 매핑 — `resume_bullet.embedding`은 JPA 표준 타입이 아니다
+- **갭 분석 (3단계) — 선행 조건은 다 갖춰졌다.** 이력서 문장·벡터가 저장되고
+  `ResumeBulletEmbeddingRepository.findNearest` 가 요구사항별 후보를 뽑는다. 남은 것은
+  "요구사항 1개 + 후보 3개 → MET/WEAK/MISSING 판정" LLM 경로와 `gap_item` 저장,
+  그리고 제출 이력 목록의 `gapSummary` 채우기다
+- 리라이트 (4단계) — 갭 분석의 WEAK 항목이 입력이라 그쪽이 먼저다.
+  **이력서 원문 복호화 경로가 열리는 유일한 지점**이기도 하다 (`TextCipher.decrypt` 는
+  아직 테스트 외에 호출부가 없다)
+- 이력서 화면 — 백엔드만 있고 `jobit-front` 에 대응 화면이 없다
 - 인증 관련 컨트롤러 — 인증이 프론트에 있으므로 당분간 필요 없다
+
+> **pgvector Hibernate 타입 매핑은 하지 않기로 했다.** 이 컬럼의 실제 사용처가 코사인 유사도
+> 상위 N개 조회 하나뿐이라, 엔티티에 매핑해 봐야 1536개짜리 배열을 메모리로 실어 나르는 일만
+> 생기고 정작 필요한 `<=>` 는 JPQL로 표현되지 않아 어차피 네이티브 쿼리가 된다.
+> `ResumeBullet` 은 이 컬럼을 모른 채로 두고 `ResumeBulletEmbeddingRepository` 만 다룬다.
 
 ### 지출 방어 (LlmGuard)
 
