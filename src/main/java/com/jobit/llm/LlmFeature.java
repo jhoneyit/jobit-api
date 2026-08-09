@@ -12,6 +12,21 @@ public enum LlmFeature {
 
 	QUESTION_GEN,
 
+	/** 이력서 본문을 문장(bullet) 단위로 쪼갠다 (스펙 §3.3). */
+	RESUME_PARSE,
+
+	/**
+	 * 문장 임베딩 (스펙 §4.3 1단계).
+	 *
+	 * <p><b>이것만 제공자가 다르다.</b> Anthropic 은 임베딩 API 가 없어 OpenAI 를 쓴다.
+	 * 그래서 {@code llm_call_log.model} 에 {@code claude-*} 가 아닌 값이 들어오는 유일한
+	 * 기능이고, 단가도 {@link LlmPricing} 에 따로 잡혀 있다.
+	 *
+	 * <p>단가가 두 자릿수 배로 싸다 — 호출 수가 많아도 비용 대시보드에서 거의 보이지 않는 것이
+	 * 정상이다.
+	 */
+	EMBEDDING,
+
 	GAP_ANALYSIS,
 
 	REWRITE,

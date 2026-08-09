@@ -26,7 +26,11 @@ public final class LlmPricing {
 	private static final Map<String, Rate> RATES = Map.of(
 			"claude-opus-5", new Rate(new BigDecimal("5.0"), new BigDecimal("25.0")),
 			"claude-sonnet-5", new Rate(new BigDecimal("3.0"), new BigDecimal("15.0")),
-			"claude-haiku-4-5", new Rate(new BigDecimal("1.0"), new BigDecimal("5.0")));
+			"claude-haiku-4-5", new Rate(new BigDecimal("1.0"), new BigDecimal("5.0")),
+			// 임베딩 (OpenAI). **출력 토큰이 없다** — 벡터는 토큰으로 과금되지 않는다.
+			// 이 줄이 없으면 아래 DEFAULT_RATE(최상위 모델 단가)로 잡혀 실제의 250배로
+			// 기록되고, 비용 대시보드가 임베딩을 가장 비싼 기능으로 보여 준다.
+			"text-embedding-3-small", new Rate(new BigDecimal("0.02"), BigDecimal.ZERO));
 
 	/** 모르는 모델은 최상위 단가로 잡는다 — 과소 계상보다 과대 계상이 안전하다. */
 	private static final Rate DEFAULT_RATE = new Rate(new BigDecimal("5.0"), new BigDecimal("25.0"));

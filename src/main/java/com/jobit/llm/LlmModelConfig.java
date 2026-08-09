@@ -29,6 +29,10 @@ public final class LlmModelConfig {
 			// 제품의 첫인상을 결정하는 지점. 품질에 투자한다.
 			LlmFeature.QUESTION_GEN,
 			new FeatureConfig(DEFAULT_MODEL, OutputConfig.Effort.HIGH, 16_000L),
+			// 이력서 → 문장 분해. JD 파싱과 성격이 같은 구조화 추출이라 effort 도 같다.
+			// **maxTokens 는 JD 파싱보다 크다** — 출력이 이력서 문장 전체라 입력만큼 길다.
+			LlmFeature.RESUME_PARSE,
+			new FeatureConfig(DEFAULT_MODEL, OutputConfig.Effort.LOW, 16_000L),
 			// 3단계 — 요구사항 1개 + 후보 문장 3개로 판정만. 입력이 짧다.
 			LlmFeature.GAP_ANALYSIS,
 			new FeatureConfig(DEFAULT_MODEL, OutputConfig.Effort.MEDIUM, 4_000L),
@@ -43,6 +47,13 @@ public final class LlmModelConfig {
 	private LlmModelConfig() {
 	}
 
+	/**
+	 * <p><b>{@link LlmFeature#EMBEDDING} 은 여기 없다 — 빠뜨린 것이 아니다.</b> 임베딩은
+	 * 제공자가 Anthropic 이 아니라 이 표의 두 축(모델 이름·effort)이 성립하지 않고,
+	 * 모델은 {@code resume_bullet.embedding} 의 차원과 묶여 있어 설정으로 바꿀 수 있는
+	 * 값도 아니다. 그래서 {@code OpenAiEmbeddingClient} 안에 상수로 박혀 있다 —
+	 * 여기서 바꿀 수 있게 두면 스키마와 어긋난 모델을 고를 수 있게 된다.
+	 */
 	public static FeatureConfig of(LlmFeature feature) {
 		FeatureConfig config = CONFIGS.get(feature);
 		if (config == null) {
