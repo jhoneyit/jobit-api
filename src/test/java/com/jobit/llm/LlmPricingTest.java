@@ -9,57 +9,46 @@ import org.junit.jupiter.api.Test;
 /**
  * 비용 계산 (스펙 §3.5).
  *
- * <p>이 값이 틀리면 비용 대시보드가 조용히 거짓말을 한다 — 그걸 보고 모델 티어를 정하므로
- * 틀린 방향으로 결정하게 된다.
+ * <p><b>지키는 성질이 뒤집혔다.</b> 유료 제공자 시절 이 테스트는 단가 곱셈이 맞는지를 봤다 —
+ * 틀리면 비용 대시보드가 거짓말을 했다. 로컬 추론에서는 반대로 <b>0 이 아닌 금액이 나오는 것이
+ * 버그다</b>: 지어낸 금액이 {@code llm_call_log} 에 쌓이면 {@link LlmGuard} 의 일일 상한이
+ * 그 거짓 지출을 근거로 멀쩡한 요청을 막는다.
  */
 class LlmPricingTest {
 
 	@Test
-	@DisplayName("입력·출력 단가를 따로 곱한다")
-	void chargesInputAndOutputSeparately() {
-		// opus-5: 입력 $5/M, 출력 $25/M → 1M + 1M = $30
-		BigDecimal cost = LlmPricing.costUsd("claude-opus-5", 1_000_000, 1_000_000, 0, 0);
-
-		assertThat(cost).isEqualByComparingTo("30.0");
-	}
-
-	@Test
-	@DisplayName("캐시 읽기는 입력의 0.1배 — 입력 토큰에 합산하지 않는다")
-	void chargesCacheReadAtReducedRate() {
-		BigDecimal cost = LlmPricing.costUsd("claude-opus-5", 0, 0, 1_000_000, 0);
-
-		assertThat(cost).isEqualByComparingTo("0.5");
-	}
-
-	@Test
-	@DisplayName("캐시 생성은 입력의 1.25배")
-	void chargesCacheWriteAtPremium() {
-		BigDecimal cost = LlmPricing.costUsd("claude-opus-5", 0, 0, 0, 1_000_000);
-
-		assertThat(cost).isEqualByComparingTo("6.25");
-	}
-
-	@Test
-	@DisplayName("모르는 모델은 0원이 아니라 최상위 단가로 잡는다")
-	void unknownModelFallsBackToTopRate() {
-		BigDecimal cost = LlmPricing.costUsd("claude-something-new", 1_000_000, 0, 0, 0);
-
-		assertThat(cost).isEqualByComparingTo("5.0");
-		assertThat(LlmPricing.isKnownModel("claude-something-new")).isFalse();
-	}
-
-	@Test
-	@DisplayName("cost_usd 컬럼이 numeric(12,6)이라 6자리로 반올림한다")
-	void roundsToColumnScale() {
-		BigDecimal cost = LlmPricing.costUsd("claude-opus-5", 1, 0, 0, 0);
-
-		assertThat(cost.scale()).isEqualTo(6);
-	}
-
-	@Test
-	@DisplayName("호출이 없으면 0원")
-	void zeroTokensCostNothing() {
-		assertThat(LlmPricing.costUsd("claude-opus-5", 0, 0, 0, 0))
+	@DisplayName("로컬 모델은 얼마를 쓰든 0원이다")
+	void localModelsCostNothing() {
+		assertThat(LlmPricing.costUsd("qwen3:14b", 1_000_000, 1_000_000))
 			.isEqualByComparingTo(BigDecimal.ZERO);
+		assertThat(LlmPricing.costUsd("qwen3-embedding:0.6b", 1_000_000, 0))
+			.isEqualByComparingTo(BigDecimal.ZERO);
+	}
+
+	/**
+	 * 유료 시절과 반대다. 그때는 모르는 모델을 최상위 단가로 잡았다 — 과소 계상이 위험했다.
+	 * 이제 모르는 모델도 로컬이므로, 지어낸 단가가 일일 상한에 쌓이는 쪽이 위험하다.
+	 */
+	@Test
+	@DisplayName("모르는 모델도 0원이다 — 다만 이름은 모르는 것으로 표시된다")
+	void unknownModelIsFreeButFlagged() {
+		assertThat(LlmPricing.costUsd("qwen3:someday-new", 1_000_000, 0))
+			.isEqualByComparingTo(BigDecimal.ZERO);
+		assertThat(LlmPricing.isKnownModel("qwen3:someday-new"))
+			.as("금액은 같아도 오타 감지는 남아 있어야 한다 — LlmCallRecorder 가 경고를 낸다")
+			.isFalse();
+	}
+
+	@Test
+	@DisplayName("기본 모델과 임베딩 모델은 단가표가 안다")
+	void knowsConfiguredModels() {
+		assertThat(LlmPricing.isKnownModel(LlmModelConfig.DEFAULT_MODEL)).isTrue();
+		assertThat(LlmPricing.isKnownModel("qwen3-embedding:0.6b")).isTrue();
+	}
+
+	@Test
+	@DisplayName("cost_usd 컬럼이 numeric(12,6)이라 6자리 스케일을 유지한다")
+	void keepsColumnScale() {
+		assertThat(LlmPricing.costUsd("qwen3:14b", 1, 0).scale()).isEqualTo(6);
 	}
 }

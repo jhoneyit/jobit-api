@@ -1,7 +1,7 @@
 package com.jobit.llm;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
 import java.util.List;
 import lombok.extern.slf4j.Slf4j;
@@ -123,7 +123,7 @@ public final class IncrementalArrayParser {
 		try {
 			return MAPPER.readValue(json, type);
 		}
-		catch (JsonProcessingException ex) {
+		catch (JacksonException ex) {
 			log.warn("배열 원소 1개를 버립니다 (스키마 불일치): {}", ex.getOriginalMessage());
 			return null;
 		}

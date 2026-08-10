@@ -95,7 +95,7 @@ public class ApiExceptionHandler {
 	@ExceptionHandler(JdParserNotConfiguredException.class)
 	public ResponseEntity<Map<String, String>> handleParserMissing(
 			JdParserNotConfiguredException ex) {
-		log.error("JdParser 구현이 없습니다. ANTHROPIC_API_KEY 설정을 확인하세요.", ex);
+		log.error("JdParser 구현이 없습니다. ollama.base-url 설정을 확인하세요.", ex);
 		return body(HttpStatus.INTERNAL_SERVER_ERROR, "공고 분석 기능이 아직 설정되지 않았습니다.");
 	}
 
@@ -105,7 +105,7 @@ public class ApiExceptionHandler {
 	@ExceptionHandler(ResumeParserNotConfiguredException.class)
 	public ResponseEntity<Map<String, String>> handleResumeParserMissing(
 			ResumeParserNotConfiguredException ex) {
-		log.error("ResumeParser 구현이 없습니다. ANTHROPIC_API_KEY 설정을 확인하세요.", ex);
+		log.error("ResumeParser 구현이 없습니다. ollama.base-url 설정을 확인하세요.", ex);
 		return body(HttpStatus.INTERNAL_SERVER_ERROR, "이력서 분석 기능이 아직 설정되지 않았습니다.");
 	}
 
@@ -119,7 +119,7 @@ public class ApiExceptionHandler {
 	@ExceptionHandler(EmbeddingNotConfiguredException.class)
 	public ResponseEntity<Map<String, String>> handleEmbeddingMissing(
 			EmbeddingNotConfiguredException ex) {
-		log.error("EmbeddingClient 구현이 없습니다. openai.api-key 설정을 확인하세요.", ex);
+		log.error("EmbeddingClient 구현이 없습니다. ollama.base-url 설정을 확인하세요.", ex);
 		return body(HttpStatus.INTERNAL_SERVER_ERROR, "이력서 분석 기능이 아직 설정되지 않았습니다.");
 	}
 
@@ -141,7 +141,7 @@ public class ApiExceptionHandler {
 	@ExceptionHandler(AnswerScorerNotConfiguredException.class)
 	public ResponseEntity<Map<String, String>> handleScorerMissing(
 			AnswerScorerNotConfiguredException ex) {
-		log.error("AnswerScorer 구현이 없습니다. ANTHROPIC_API_KEY 설정을 확인하세요.", ex);
+		log.error("AnswerScorer 구현이 없습니다. ollama.base-url 설정을 확인하세요.", ex);
 		return body(HttpStatus.INTERNAL_SERVER_ERROR, "답변 채점 기능이 아직 설정되지 않았습니다.");
 	}
 

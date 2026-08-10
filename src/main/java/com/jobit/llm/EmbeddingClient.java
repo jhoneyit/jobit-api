@@ -5,14 +5,14 @@ import java.util.List;
 /**
  * 문장을 벡터로 바꾸는 클라이언트 (스펙 §4.3 1단계).
  *
- * <p><b>왜 Anthropic 이 아닌가.</b> Anthropic 은 임베딩 API 를 제공하지 않는다 — Messages,
- * Batches, Files, Token Counting, Models 어디에도 임베딩 엔드포인트가 없다. 그래서 이 제품에서
- * 유일하게 <b>두 번째 LLM 제공자가 필요한 지점</b>이다. 인터페이스를 따로 둔 이유가 이것이다:
- * 제공자를 갈아탈 때 도메인 코드가 흔들리지 않아야 한다.
+ * <p><b>인터페이스를 따로 둔 값을 이미 한 번 받았다.</b> 이 자리의 구현은 OpenAI
+ * {@code text-embedding-3-small} 이었다가 Ollama 로 갈아탔는데, 그때 바뀐 것은 구현체 하나와
+ * 벡터 차원뿐이고 {@code ResumeService} 는 손대지 않았다.
  *
- * <p><b>차원 수는 스키마가 정한다.</b> {@code resume_bullet.embedding} 이 {@code vector(1536)}
- * 이므로 구현체는 반드시 1536차원을 내야 한다. 모델을 바꿔 차원이 달라지면 Flyway 마이그레이션이
- * 먼저다 — {@link #dimensions()} 로 부팅 시점에 어긋남을 잡는다.
+ * <p><b>차원 수는 스키마가 정한다.</b> {@code resume_bullet.embedding} 이 {@code vector(1024)}
+ * 이므로 구현체는 반드시 1024차원을 내야 한다. 모델을 바꿔 차원이 달라지면 Flyway 마이그레이션이
+ * 먼저고, <b>기존 벡터는 변환할 방법이 없어 재업로드가 따라온다</b> — 차원이 다른 임베딩 공간
+ * 사이에는 대응이 없다.
  */
 public interface EmbeddingClient {
 

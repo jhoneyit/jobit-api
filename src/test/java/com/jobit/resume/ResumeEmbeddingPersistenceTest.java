@@ -30,8 +30,8 @@ import org.springframework.transaction.annotation.Transactional;
 @Transactional
 class ResumeEmbeddingPersistenceTest {
 
-	/** {@code resume_bullet.embedding vector(1536)} 과 같아야 한다. 하나만 틀려도 Postgres 가 거부한다. */
-	private static final int DIMENSIONS = 1536;
+	/** {@code resume_bullet.embedding vector(1024)} 와 같아야 한다 (V11). 하나만 틀려도 Postgres 가 거부한다. */
+	private static final int DIMENSIONS = 1024;
 
 	@Autowired
 	private ResumeRepository resumeRepository;

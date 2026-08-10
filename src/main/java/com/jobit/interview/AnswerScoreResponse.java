@@ -4,7 +4,7 @@ import com.fasterxml.jackson.annotation.JsonPropertyDescription;
 import java.util.List;
 
 /**
- * LLM 구조화 출력의 형태. SDK가 이 클래스에서 JSON Schema를 파생시킨다.
+ * LLM 구조화 출력의 형태. {@link com.jobit.llm.JsonSchemas}가 이 클래스에서 JSON Schema를 파생시킨다.
  *
  * <p>{@code @JsonPropertyDescription}은 <b>장식이 아니라 프롬프트의 일부</b>다. 스키마에 실려
  * 모델에게 전달되므로, 필드 의미가 바뀌면 여기부터 고친다 ({@code JdParseResponse}와 같은 규약).

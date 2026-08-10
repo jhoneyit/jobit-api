@@ -1,8 +1,8 @@
 package com.jobit.question;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.ObjectMapper;
 import com.jobit.jd.JobPosting;
 import com.jobit.jd.JobPostingRepository;
 import com.jobit.jd.Requirement;
@@ -106,10 +106,9 @@ public class QuestionService {
 			return new Outcome(null, pending.size(), false);
 		}
 
-		// 재시도가 아니라 한 번의 스트림이지만, 돈이 나갔으므로 성공·실패와 무관하게 기록한다.
+		// 재시도가 아니라 한 번의 스트림이지만, 추론은 이미 일어났으므로 성공·실패와 무관하게 기록한다.
 		callRecorder.record(LlmFeature.QUESTION_GEN, result.model(), result.usage().inputTokens(),
-				result.usage().outputTokens(), result.usage().cacheReadTokens(),
-				result.usage().cacheCreationTokens(), false, result.latencyMs());
+				result.usage().outputTokens(), false, result.latencyMs());
 
 		UUID setId = writer.save(posting, requirements, pending, result.model());
 		return new Outcome(setId, pending.size(), false);
@@ -149,7 +148,7 @@ public class QuestionService {
 			return MAPPER.readValue(posting.getParsed(), new TypeReference<Map<String, Object>>() {
 			});
 		}
-		catch (JsonProcessingException ex) {
+		catch (JacksonException ex) {
 			// 메타데이터가 없어도 요구사항만으로 질문은 만들 수 있다. 여기서 멈추지 않는다.
 			log.warn("job_posting.parsed 를 읽지 못했습니다. 메타데이터 없이 진행합니다: {}",
 					posting.getId());
@@ -161,7 +160,7 @@ public class QuestionService {
 		try {
 			return MAPPER.writeValueAsString(values);
 		}
-		catch (JsonProcessingException ex) {
+		catch (JacksonException ex) {
 			return "[]";
 		}
 	}
@@ -180,7 +179,7 @@ public class QuestionService {
 	public static class QuestionGeneratorNotConfiguredException extends IllegalStateException {
 
 		public QuestionGeneratorNotConfiguredException() {
-			super("LLM 클라이언트가 없어 질문을 생성할 수 없습니다. ANTHROPIC_API_KEY 를 확인해 주세요.");
+			super("LLM 클라이언트가 없어 질문을 생성할 수 없습니다. ollama.base-url 설정을 확인해 주세요.");
 		}
 	}
 }

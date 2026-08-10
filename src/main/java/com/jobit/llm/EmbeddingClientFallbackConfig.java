@@ -28,7 +28,7 @@ public class EmbeddingClientFallbackConfig {
 	@Bean
 	@ConditionalOnMissingBean(EmbeddingClient.class)
 	public EmbeddingClient unavailableEmbeddingClient() {
-		log.warn("EmbeddingClient 구현이 없습니다 (openai.api-key 미설정). 이력서 업로드를 호출하면 실패합니다.");
+		log.warn("EmbeddingClient 구현이 없습니다 (ollama.base-url 미설정). 이력서 업로드를 호출하면 실패합니다.");
 		return new EmbeddingClient() {
 
 			@Override
@@ -46,7 +46,7 @@ public class EmbeddingClientFallbackConfig {
 	public static class EmbeddingNotConfiguredException extends IllegalStateException {
 
 		public EmbeddingNotConfiguredException() {
-			super("EmbeddingClient 구현이 등록되지 않았습니다. openai.api-key 를 넣어야 이력서 분석이 동작합니다.");
+			super("EmbeddingClient 구현이 등록되지 않았습니다. ollama.base-url 을 설정해야 이력서 분석이 동작합니다.");
 		}
 	}
 }

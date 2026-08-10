@@ -1,8 +1,8 @@
 package com.jobit.interview;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.ObjectMapper;
 import com.jobit.common.NotFoundException;
 import com.jobit.common.OwnerKey;
 import com.jobit.jd.JobPosting;
@@ -226,7 +226,7 @@ public class InterviewService {
 				question.getRequirement() == null ? null : question.getRequirement().getText(),
 				transcript));
 
-		// **구현을 믿지 않고 저장 직전에 한 번 더 정규화한다.** AnthropicAnswerScorer 도 같은
+		// **구현을 믿지 않고 저장 직전에 한 번 더 정규화한다.** OllamaAnswerScorer 도 같은
 		// 일을 하지만, 그건 그 구현의 사정이다 — 포트 뒤에 무엇이 꽂히든 DB 에 들어가는 값은
 		// 성질을 지켜야 한다 (점수 0~100 은 CHECK 제약이, 인덱스 범위는 아무것도 막지 않는다).
 		// 멱등이라 두 번 걸어도 결과가 같다.
@@ -381,7 +381,7 @@ public class InterviewService {
 			return MAPPER.readValue(json, new TypeReference<List<Integer>>() {
 			});
 		}
-		catch (JsonProcessingException ex) {
+		catch (JacksonException ex) {
 			// 우리가 쓴 값이라 여기 올 일이 없지만, 한 줄 때문에 상세 화면이 통째로 죽는
 			// 것보다 그 줄만 비는 편이 낫다.
 			log.warn("채점 인덱스를 읽지 못했습니다", ex);
@@ -413,7 +413,7 @@ public class InterviewService {
 		try {
 			return MAPPER.writeValueAsString(indexes);
 		}
-		catch (JsonProcessingException ex) {
+		catch (JacksonException ex) {
 			throw new IllegalStateException("채점 결과를 직렬화하지 못했습니다", ex);
 		}
 	}

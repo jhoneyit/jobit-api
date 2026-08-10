@@ -4,11 +4,11 @@ import com.fasterxml.jackson.annotation.JsonPropertyDescription;
 import java.util.List;
 
 /**
- * 이력서 분해 LLM 구조화 출력의 형태 (스펙 §3.3). SDK 가 이 클래스에서 JSON Schema 를 파생시킨다.
+ * 이력서 분해 LLM 구조화 출력의 형태 (스펙 §3.3). {@link com.jobit.llm.JsonSchemas} 가 이 클래스에서 JSON Schema 를 파생시킨다.
  *
  * <p>{@code @JsonPropertyDescription} 은 <b>장식이 아니라 프롬프트의 일부</b>다 —
  * {@code JdParseResponse} 와 같다. 개수·길이 제약은 구조화 출력이 지원하지 않으므로
- * {@link ResumeParsePrompts#SYSTEM} 에 글로 적고 {@link AnthropicResumeParser} 가 재검증한다.
+ * {@link ResumeParsePrompts#SYSTEM} 에 글로 적고 {@link OllamaResumeParser} 가 재검증한다.
  */
 public record ResumeParseResponse(
 
