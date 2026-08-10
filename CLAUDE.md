@@ -47,8 +47,14 @@ JD 텍스트 → [파싱] → requirement[] ─┬→ question (질문·꼬리�
 - PostgreSQL + Flyway, `pgvector` 확장 (임베딩 기반 후보 추림에 사용)
 - `spring-security-crypto` (BCrypt strength 12) — 해싱만. `starter-security`는 넣지 않았다
 - Lombok, DevTools
-- LLM: Anthropic Java SDK (`com.anthropic:anthropic-java`), 구조화 출력(JSON schema) 필수.
-  Boot의 BOM이 관리하지 않으므로 `build.gradle`에 버전을 직접 박는다
+- LLM: **로컬 Ollama + Qwen3** (2026-08-10, Anthropic 에서 전환). SDK 없이 `RestClient` 로
+  `/api/chat`·`/api/embed` 를 직접 부른다 (`llm/OllamaChatClient`, `llm/OllamaEmbeddingClient`).
+  구조화 출력은 Ollama `format` 에 JSON Schema 를 실어 강제하고, 스키마는 `llm/JsonSchemas` 가
+  응답 record 에서 파생시킨다 (SDK 의 `outputConfig(Class)` 가 하던 일)
+- **Jackson 은 Boot 4 기준 Jackson 3 (`tools.jackson`)이다.** Boot 4 의 `starter-webmvc` 는
+  Jackson 을 딸려 오지 않아 `starter-json` 을 직접 선언했다 — 예전에 클래스패스에 있었던 건
+  anthropic-java 의 전이 의존(Jackson 2)이었다. 애너테이션(`@JsonProperty` 등)만
+  `com.fasterxml.jackson.annotation` 그대로다
 
 ### 스택 결정 (중요)
 
@@ -139,27 +145,22 @@ src/main/resources/
 자동으로 읽어 주지 않으므로 그 줄이 없으면 파일을 만들어 둬도 조용히 무시된다 — 호출자 인증이
 꺼진 채로 뜨는 것이 그 결과였다. OS 환경변수가 `.env` 보다 우선한다.
 
-**LLM 키 둘은 `.env` 에 소문자 프로퍼티 이름으로 넣는다** — `anthropic.api-key` 와
-`openai.api-key` 다. 이 파일에서 이 둘만 SHOUT_CASE 가 아니다.
-`@ConditionalOnProperty("anthropic.api-key")` 가 그 이름을 그대로 찾는데,
-`ANTHROPIC_API_KEY` → `anthropic.api-key` 완화 바인딩은 **OS 환경변수 소스에만** 적용되고
+**LLM 스위치는 `.env` 의 `ollama.base-url` 이다** — API 키가 아니라 주소이고, 로컬 Ollama 라
+인증이 없다. 이 파일에서 이것만 SHOUT_CASE 가 아니다.
+`@ConditionalOnProperty("ollama.base-url")` 가 그 이름을 그대로 찾는데,
+`OLLAMA_BASE_URL` → `ollama.base-url` 완화 바인딩은 **OS 환경변수 소스에만** 적용되고
 properties 로 읽는 `.env` 에는 적용되지 않는다. SHOUT_CASE 로 적으면 조용히 무시되고 폴백이
 자리를 지킨다.
 
-**`application.properties` 에 `openai.api-key=${OPENAI_API_KEY:}` 같은 다리를 놓지 않는다.**
-`@ConditionalOnProperty` 는 값이 **빈 문자열이어도 "있음"으로 판정**하므로, 그 줄을 넣으면
-키가 없을 때도 빈이 등록되어 폴백이 물러난다. 부팅은 멀쩡한데 이력서 업로드만 401 로 죽는다.
+**`application.properties` 에 `ollama.base-url=${OLLAMA_BASE_URL:http://localhost:11434}` 같은
+기본값 다리를 놓지 않는다.** `@ConditionalOnProperty` 는 값이 있기만 하면 매칭하므로, 그 줄을
+넣으면 프로퍼티가 항상 "있음"이 되어 폴백 4개(JdParser·ResumeParser·AnswerScorer·
+EmbeddingClient)가 영영 물리지 않는다 — "LLM 설정 없이도 앱은 뜬다"가 조용히 사라진다.
 (`jobit.auth.service-secret` 과 `jobit.resume.encryption-key` 는 `@Value` 로 받아 직접
 빈 값을 검사하므로 다리를 놓아도 된다 — 조건이 붙은 쪽만 문제다.)
 
 **`JOBIT_RESUME_KEY` 는 SHOUT_CASE 다** (`application.properties` 가 다리를 놓는다).
 없으면 이력서 업로드가 거부되고, `prod` 에서는 앱이 뜨지 않는다.
-
-(`AnthropicOkHttpClient.fromEnv()` 는 쓰지 않는다. 그쪽이야말로 OS 환경변수만 읽는다 —
-`AnthropicConfig` 가 `@Value` 로 받아 `builder().apiKey(...)` 에 직접 넘긴다.)
-
-**스모크 테스트는 여전히 OS 환경변수를 본다.** `System.getenv` 를 직접 읽으므로 `.env` 에만
-넣으면 조용히 건너뛴다 — 돌릴 때만 `export ANTHROPIC_API_KEY=...` 한다.
 
 ## 문서
 
@@ -190,15 +191,21 @@ properties 로 읽는 `.env` 에는 적용되지 않는다. SHOUT_CASE 로 적�
 - **`GET /api/questions` 동작** — SSE 스트리밍. 완성된 질문을 하나씩 흘려보낸다.
   `IncrementalArrayParser` 가 스트림에서 완성된 배열 원소를 골라낸다 (문자열 안의 중괄호·
   이스케이프에 속지 않는 상태 기계). `prompt_version` 이 같으면 재생성하지 않는다.
-  실측: in=2,813 out=3,526 $0.102 / 62초, 두 번째 호출은 캐시로 0초
+  두 번째 호출은 캐시로 0초 (Anthropic 시절 실측 in=2,813 out=3,526 / 62초 — Ollama 전환 후
+  로컬 재실측 필요)
 - **`GET·DELETE /api/submissions` + `POST /api/submissions/claim` 동작** — 내 기록 목록·삭제·
   익명 승계. 목록 한 줄에 붙는 집계 셋(요구사항 수·질문 수·갭 요약)을 **공고 ID를 한 번에 넘겨**
   가져온다. 이걸로 프론트가 `jd_submission`을 직접 읽던 마지막 경로가 사라졌다
   (관리자 콘솔은 여전히 DB를 직접 읽는다 — 운영용이라 대응 엔드포인트가 없다)
-- **LLM 연동** — Anthropic Java SDK, 구조화 출력 + 서버 재검증 + 3회 재시도, `llm_call_log` 비용 기록
+- **LLM 연동** — 로컬 Ollama + Qwen3 (`RestClient` 직접 호출, SDK 없음), 구조화 출력
+  (`JsonSchemas` 파생 → `format`) + 서버 재검증 + 3회 재시도, `llm_call_log` 기록
+  (비용은 0, 토큰·지연 관측용). **2026-08-10 Anthropic 에서 전환** — 외부로 나가는 호출이
+  하나도 없어졌고, 임베딩까지 제공자가 하나로 합쳐졌다
 - 엔티티 + 리포지토리 전체 (`jd` / `question` / `resume` / `gap` / `submission` / `member` / `llm`)
-- Flyway V1~V10 — pgvector 확장, 코어 스키마, 로컬 가입 컬럼, `password_reset_token`,
-  `owner_key` 전환, DB 단일화, 레이트 리밋, 프로필, 면접 연습(V9~V10)
+- Flyway V1~V11 — pgvector 확장, 코어 스키마, 로컬 가입 컬럼, `password_reset_token`,
+  `owner_key` 전환, DB 단일화, 레이트 리밋, 프로필, 면접 연습(V9~V10),
+  임베딩 1024차원 전환(V11 — **기존 벡터는 버려졌다.** 컬럼을 drop+add 했으므로 V11 이전에
+  올린 이력서는 재업로드해야 갭 분석에 쓰인다)
 - 서비스: `JdParsingService`(캐시·경합 처리),
   `JdSubmissionService`(이력 목록 + 갭 요약, N+1 회피, 익명→계정 승계)
 - 미사용 서비스: `LocalAccountService`, `PasswordResetService`, `MemberService` — 인증이 프론트에 있다
@@ -206,24 +213,26 @@ properties 로 읽는 `.env` 에는 적용되지 않는다. SHOUT_CASE 로 적�
   (`/interview`, `/profile/interviews`) + `transcript` TTL 정리까지. 스펙에 없는 새 축이다.
   채점 기준은 새로 만들지 않고 `question.answer_outline`을 쓴다 — 사용자가 결과 화면에서 본
   그 뼈대가 그대로 기준이다. **오디오는 저장하지 않는다**: STT는 브라우저(Web Speech API)
-  몫이고 서버는 텍스트만 받는다. 실측: 채점 1회 $0.0065(캐시 적중)·$0.0159(첫 호출),
-  5문항 세션 $0.042 — **프롬프트 캐싱으로 46% 절감**. 캐시는 채점에만 건다 (TTL 5분보다
-  뜸한 호출은 쓰기만 하고 읽기가 없어 오히려 비싸다)
+  몫이고 서버는 텍스트만 받는다. (Anthropic 시절 걸었던 `cache_control` 프롬프트 캐싱은
+  Ollama 전환으로 사라졌다 — 해당 API 가 없고, 같은 프리픽스는 KV 캐시로 자동 재사용된다.
+  대신 `OLLAMA_KEEP_ALIVE` 를 넉넉히 잡아야 세션 중간에 모델이 내려가지 않는다)
 - **이력서 업로드 완료** (2026-08-09, docs/api.md "이력서") — 텍스트 업로드 → LLM 문장 분해 →
   임베딩 → 저장까지 한 경로. 엔드포인트 5종. **여기서 pgvector가 처음 실제로 쓰인다.**
   - **원문은 AES-256-GCM 으로 암호화 저장한다** (`common.TextCipher`). 키가 없으면 평문으로
     폴백하지 않고 **업로드를 거부한다** — 인증과 반대 결정이고, 평문 이력서는 되돌릴 수 없어서다
-  - **임베딩만 제공자가 다르다.** Anthropic은 임베딩 API가 없어 OpenAI
-    `text-embedding-3-small`(1536차원)을 쓴다. 스키마의 `vector(1536)`이 그 값이라 마이그레이션이
-    필요 없었다. SDK 없이 `RestClient` 로 직접 부른다 — 엔드포인트가 하나뿐이다
+  - **임베딩도 같은 Ollama 다** (`qwen3-embedding:0.6b`, 1024차원 — V11 에서 컬럼을 맞췄다).
+    처음에는 OpenAI `text-embedding-3-small`(1536차원)이었는데, Anthropic 에 임베딩 API 가
+    없어서였다. Ollama 는 생성과 임베딩을 한 서버에서 주므로 두 번째 제공자가 사라졌다.
+    **모델을 바꾸면 차원부터 본다** — 다르면 Flyway 마이그레이션 + 재업로드가 따라온다
   - **LLM 호출을 트랜잭션 밖에 뒀다.** `JdParsingService`와 다른데, 분해가 수십 초라 그동안
     커넥션을 붙들면 동시 업로드 몇 건에 풀이 마르고 무관한 기능까지 멈춘다. 임베딩까지 끝낸 뒤
     `TransactionTemplate`으로 짧은 쓰기 트랜잭션만 연다
   - **문장 순서와 벡터 순서가 어긋나면 저장하지 않는다.** 밀린 인덱스는 결과가 그럴듯해서
-    사후에 가장 찾기 어렵다 (`OpenAiEmbeddingClient`는 응답을 `index`로 재정렬까지 한다)
+    사후에 가장 찾기 어렵다. (OpenAI 시절에는 응답의 `index` 로 재정렬까지 했지만 Ollama
+    `/api/embed` 응답에는 index 가 없다 — 배열 위치가 곧 순서라, 남은 방어는 개수 일치뿐이다)
   - 90일 TTL + `ResumeCleanup`. 면접 답변과 달리 **행을 통째로 지운다** — 이력서는 문장 자체가
     내용의 전부라 원문을 지우고 남길 것이 없다
-- 테스트 239개 전부 통과 (스모크 4개는 스위치가 없어 건너뜀).
+- 테스트 251개 전부 통과 (스모크 3개는 스위치가 없어 건너뜀).
   `ResumeEmbeddingPersistenceTest`가 **pgvector 경로를 실제 Postgres로 검증한다** —
   `::vector` 캐스트·`<=>` 연산자·리터럴 형식·차원 수는 넷 다 컴파일러가 봐주지 않고,
   셋은 예외조차 없이 그냥 틀린 순서를 돌려준다.
@@ -247,19 +256,27 @@ properties 로 읽는 `.env` 에는 적용되지 않는다. SHOUT_CASE 로 적�
 - 인증 관련 컨트롤러 — 인증이 프론트에 있으므로 당분간 필요 없다
 
 > **pgvector Hibernate 타입 매핑은 하지 않기로 했다.** 이 컬럼의 실제 사용처가 코사인 유사도
-> 상위 N개 조회 하나뿐이라, 엔티티에 매핑해 봐야 1536개짜리 배열을 메모리로 실어 나르는 일만
+> 상위 N개 조회 하나뿐이라, 엔티티에 매핑해 봐야 1024개짜리 배열을 메모리로 실어 나르는 일만
 > 생기고 정작 필요한 `<=>` 는 JPQL로 표현되지 않아 어차피 네이티브 쿼리가 된다.
 > `ResumeBullet` 은 이 컬럼을 모른 채로 두고 `ResumeBulletEmbeddingRepository` 만 다룬다.
 
-### 지출 방어 (LlmGuard)
+### 자원 방어 (LlmGuard)
 
-두 겹이다. 설정은 `application.properties` 의 `jobit.llm.*`.
+**막는 대상이 돈에서 시간으로 바뀌었다** (2026-08-10 Ollama 전환). 로컬 추론에는 토큰 요금이
+없다. 대신 GPU 가 하나뿐이라 폭주하는 요청 하나가 다른 모든 요청을 줄 세운다 — 피해가
+청구서에서 대기 시간으로 바뀌었을 뿐 방어는 여전히 필요하다. 설정은 `jobit.llm.*`.
 
 | | 무엇을 막나 | 기본값 |
 |---|---|---|
 | 소유자별 시간당 한도 | 한 사람의 폭주 | 20회 |
-| 전역 일일 비용 상한 | 여러 사람이 몰렸을 때의 총액 | $5.00 |
+| 전역 일일 비용 상한 | (휴면) 유료 제공자 복귀 시 총액 | **0 = 꺼짐** |
 | 면접 연습 일별 세션 | 세션 1건 = LLM N회인 유일한 기능 | 6세션 |
+
+**일일 비용 상한은 꺼져 있다.** `LlmPricing` 이 로컬 모델을 전부 0 원으로 계산해 어차피 발동하지
+않는다 — 스위치(`daily-budget-usd=0`)와 계산이 둘 다 0 을 가리키게 맞춰 뒀다. 유료 제공자를
+다시 붙이면 `LlmPricing` 의 단가와 함께 되살린다. **모르는 모델을 0 원으로 잡는 것도 그때
+뒤집어야 한다** — 지금은 과대 계상(지어낸 금액이 상한에 쌓여 멀쩡한 요청을 막는 것)이 위험이라
+0 이 기본이지만, 유료로 돌아가면 과소 계상이 위험이다.
 
 **면접 연습만 세 번째 겹이 필요하다.** 다른 기능은 요청 1건 = LLM 1회지만 면접 연습은 세션 1건이
 문항 수만큼을 먹어서, 시간당 한도만으로는 세션 네 번에 소진되며 공고 분석까지 함께 막힌다.
@@ -267,41 +284,56 @@ properties 로 읽는 `.env` 에는 적용되지 않는다. SHOUT_CASE 로 적�
 카운터는 `interview_session` 을 직접 센다 (`rate_limit_bucket` 은 창을 2시간 뒤 정리해서
 일별 창을 둘 수 없다).
 
-- **횟수만으로는 부족하다.** 기능마다 단가가 열 배씩 차이 난다 (파싱 $0.034 / 질문 생성 $0.102).
-  그래서 총액은 `llm_call_log.cost_usd` 합계로 따로 막는다.
-- **캐시 적중은 소비하지 않는다.** 그래서 인터셉터가 아니라 **돈이 나가기 직전 한 지점**에서
+- **캐시 적중은 소비하지 않는다.** 그래서 인터셉터가 아니라 **추론이 일어나기 직전 한 지점**에서
   부른다 — 지금 그 지점은 `JdParsingService` 와 `QuestionService` 두 곳이다.
 - **카운터는 DB에 있다** (`rate_limit_bucket`). 메모리로 두면 재시작에 초기화되고 인스턴스를
   늘리면 각자 따로 센다. 증가는 `on conflict do update ... returning` 으로 원자적이다 —
   조회 후 증가로 나누면 동시 요청이 같은 값을 읽어 한도를 넘긴다.
-- **고정 창이라 경계에서 최대 두 배가 통과할 수 있다** (12:59에 20회 + 13:00에 20회).
-  비용 방어가 목적이라 허용하고, 총액은 일일 상한이 막는다.
+- **고정 창이라 경계에서 최대 두 배가 통과할 수 있다** (12:59에 20회 + 13:00에 20회). 허용한다.
 - SSE 는 이미 200 으로 헤더가 나간 뒤라 `@ExceptionHandler` 가 끼어들 수 없다.
   질문 생성 쪽은 상태 코드 대신 `error` 이벤트로 알린다.
 
-### LLM 연동에서 알아둘 것
+### 로컬 LLM (Ollama) 에서 알아둘 것
 
-- **API 키가 없으면 `AnthropicJdParser` 빈이 등록되지 않고** `JdParserFallbackConfig`의 폴백이
-  자리를 지킨다. 앱은 뜨고, 파싱을 호출하면 명확한 예외가 난다 (캐시 적중은 정상 동작).
-  이 갈림을 `JdParserWiringTest`가 양쪽 다 고정한다.
-- **`outputConfig(Class)`가 effort를 조용히 지운다.** SDK가 클래스에서 스키마를 파생시키며
-  `OutputConfig`를 통째로 새로 만들기 때문이다. `StructuredOutput.withEffort`로 다시 조립해야
-  하고, 이걸 놓치면 파싱이 기본 effort(high)로 돌아 비용이 몇 배가 된다.
-  `JdParseParamsTest`가 막고 있다 — SDK를 올릴 때 이 테스트가 깨지면 거기부터 본다.
-- **`thinking`을 끄지 않는다.** Opus 5에서 끄면 도구 호출이 일반 텍스트로 새거나
-  `<thinking>` 태그가 응답에 섞이는 실패 모드가 있다. 비용은 effort로 낮춘다.
-- **재시도도 돈이 나가므로 시도마다 `llm_call_log`에 기록한다.**
-- **실제 호출 검증은 `AnthropicJdParserSmokeTest`에서 한다.** 나머지 테스트는 요청 조립과 빈
-  배선만 보므로, 그 요청이 실제로 통하는지(인증·스키마 파생·effort/thinking 조합·역직렬화)는
-  아무도 확인하지 않는다. Docker도 Spring 컨텍스트도 타지 않고 LLM 경로만 태운다.
+돌리려면: `ollama serve` 가 떠 있고 모델 둘을 받아 둬야 한다.
+
+```bash
+brew install ollama && ollama serve
+ollama pull qwen3:14b            # 생성 (LlmModelConfig.DEFAULT_MODEL)
+ollama pull qwen3-embedding:0.6b # 임베딩 — 별개로 받아야 한다
+```
+
+- **`ollama.base-url` 이 없으면 LLM 빈 4개가 등록되지 않고** 폴백이 자리를 지킨다. 앱은 뜨고,
+  해당 기능을 호출하면 명확한 예외가 난다 (캐시 적중은 정상 동작). 이 갈림을
+  `JdParserWiringTest`·`AnswerScorerWiringTest`·`ResumeWiringTest` 가 양쪽 다 고정한다.
+- **구조화 출력 스키마는 `JsonSchemas` 가 응답 record 에서 파생시킨다.** SDK 가 하던 일이라
+  이제 우리 코드고, 실수가 전부 조용하다 — 설명(`@JsonPropertyDescription`)이 빠지면 프롬프트
+  절반이 사라진 채 나가고, 널 허용이 뒤집히면 모델이 없는 값을 지어낸다. `JsonSchemasTest` 가
+  파생 규칙과 "모든 응답 필드에 설명이 있다"를 고정한다.
+- **`num_ctx` 를 요청마다 명시한다** (`jobit.llm.ollama.num-ctx`, 기본 16384). Ollama 기본
+  컨텍스트는 훨씬 작고, 넘치면 **에러 없이 입력 앞부분이 잘린다** — 긴 공고가 그럴듯하게 틀리는
+  경로다. `LlmModelConfig` 의 maxTokens 는 이 창을 입력과 나눠 쓰므로 함께 봐야 한다.
+- **thinking 은 `Effort.HIGH` 에서만 켠다** — 지금은 질문 생성·리라이트뿐이다. Anthropic 시절
+  "끄면 안 된다"였던 것이 뒤집혔다: Qwen3 는 끄는 것이 공식 지원이고, 로컬에서 켜는 비용은
+  돈이 아니라 사용자 대기 시간이다. 채점은 세션당 문항 수만큼 반복이라 특히 켜면 안 된다.
+- **temperature=0 금지.** Qwen3 는 탐욕적 디코딩에서 같은 문장을 반복하는 실패 모드가 있다.
+  구조화 출력이라고 온도를 낮추지 말 것 — `OllamaRequestBodyTest` 가 막고 있다.
+- **프롬프트 캐싱 API 가 없다.** 같은 프리픽스는 KV 캐시로 자동 재사용된다. 대신 모델이
+  메모리에서 내려가면 캐시도 함께 사라지므로, 면접 연습을 돌릴 때는 `OLLAMA_KEEP_ALIVE` 를
+  넉넉히 (예: `1h`) 잡아 둔다.
+- **재시도도 시간이 나가므로 시도마다 `llm_call_log`에 기록한다.** 비용은 0 이지만 토큰 수와
+  지연이 남는다 — 어느 기능이 느린지 보는 장부다.
+- **실제 호출 검증은 `OllamaJdParserSmokeTest`·`OllamaAnswerScorerSmokeTest`에서 한다.**
+  나머지 테스트는 요청 조립과 빈 배선만 보므로, 그 요청이 실제로 통하는지(스키마의 GBNF 변환·
+  think 조합·역직렬화)와 **이 크기의 모델이 쓸만한 결과를 내는지**는 스모크만 안다.
+  모델을 더 작은 것으로 내리고 싶으면 채점 스모크(변별력 검사)부터 돌린다.
 
   ```bash
-  export ANTHROPIC_API_KEY=sk-ant-...
-  JOBIT_LLM_SMOKE=1 ./gradlew test --tests '*AnthropicJdParserSmokeTest*' -i
+  JOBIT_LLM_SMOKE=1 ./gradlew test --tests '*SmokeTest*' -i
   ```
 
-  **`JOBIT_LLM_SMOKE`가 없으면 건너뛴다**(실패가 아니다). 키만 있다고 매 빌드마다 과금되면
-  안 되므로 켜는 스위치를 따로 뒀다. SDK를 올리거나 프롬프트·스키마를 고친 뒤에는 이걸 한 번 돌린다.
+  **`JOBIT_LLM_SMOKE`가 없으면 건너뛴다**(실패가 아니다). 과금은 없지만 로컬 추론이 몇 분
+  걸리므로 스위치를 유지한다. 모델·프롬프트·스키마 파생을 고친 뒤에는 이걸 한 번 돌린다.
 
 ### 알려진 문제
 

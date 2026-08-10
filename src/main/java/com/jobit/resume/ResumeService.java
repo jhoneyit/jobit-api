@@ -22,7 +22,7 @@ import org.springframework.transaction.support.TransactionTemplate;
  * <pre>
  * 1. 한도 확인          — 돈이 나가기 직전
  * 2. 문장 분해 (LLM)    — 느리다. 수십 초
- * 3. 임베딩 (OpenAI)    — 빠르다. 1초 내외
+ * 3. 임베딩 (Ollama)    — 생성보다 훨씬 가볍다
  * 4. 저장               — 원문 암호화 + 문장 + 벡터를 한 트랜잭션에
  * </pre>
  *

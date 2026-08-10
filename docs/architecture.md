@@ -12,7 +12,7 @@ jobit-front (Next.js)          jobit (Spring Boot)
   화면 · SSR · 세션 쿠키   ──▶   REST API · LLM 호출 · DB · 도메인 로직
 ```
 
-경계를 가르는 기준 하나: **LLM 키와 DB 커넥션은 이쪽에만 있다.** 프론트가 Anthropic이나
+경계를 가르는 기준 하나: **LLM 호출과 DB 커넥션은 이쪽에만 있다.** 프론트가 Ollama나
 Postgres에 직접 붙는 코드가 생기면 그 시점에 경계가 무너진 것이다.
 
 | | jobit | jobit-front |
@@ -89,7 +89,7 @@ com.jobit/
 
 ### pgvector
 
-`resume_bullet.embedding vector(1536)`은 JPA 표준 타입이 아니다. Hibernate 커스텀 타입 매핑 또는
+`resume_bullet.embedding vector(1024)`는 JPA 표준 타입이 아니다. Hibernate 커스텀 타입 매핑 또는
 네이티브 쿼리로 처리해야 한다. 유사도 검색(코사인 상위 3개)은 네이티브 쿼리가 현실적이다.
 
 ### SSE 스트리밍
@@ -161,7 +161,7 @@ API 계약을 하나 두는 비용보다 크다고 판단했다.
 - [x] ~~**레이트 리밋**~~ → `LlmGuard` (소유자별 시간당 + 전역 일일 비용 + 면접 연습 일별 세션)
 - [ ] **비밀키 회전 절차** — 지금은 양쪽을 동시에 바꿔야 하므로 무중단 회전이 안 된다
 - [ ] 이력서 원문 암호화 방식 (컬럼 암호화 vs 애플리케이션 레벨)
-- [x] ~~LLM SDK 선택~~ → Anthropic Java SDK (2026-08-03)
+- [x] ~~LLM SDK 선택~~ → Anthropic Java SDK (2026-08-03) → **Ollama + Qwen3 로 전환, SDK 없이 RestClient 직접 호출** (2026-08-10)
 - [ ] `member` 패키지의 최종 처리 — 3단계에서 인증을 가져올지, 삭제할지
 - [x] ~~`owner_key` 규약 통일~~ → `common.OwnerKey` (2026-08-03)
 - [x] ~~`contextLoads()` DataSource 확보~~ → Testcontainers (2026-08-03)

@@ -20,18 +20,22 @@ import org.springframework.context.annotation.Import;
 class JdParserWiringTest {
 
 	/**
-	 * {@code anthropic.api-key=false}로 "키 없음"을 재현한다. 프로퍼티를 아예 두지 않는 것으로는
-	 * 안 되는데, OS 환경변수 {@code ANTHROPIC_API_KEY}가 Spring의 relaxed binding으로 이
-	 * 프로퍼티에 그대로 매핑되기 때문이다 — 스모크 테스트를 위해 키를 export 해 둔 기계에서는
-	 * {@link AnthropicJdParser}가 등록되어 이 시나리오가 성립하지 않는다.
+	 * {@code ollama.base-url=false}로 "설정 없음"을 재현한다. 프로퍼티를 아예 두지 않는 것으로는
+	 * 안 되는데, OS 환경변수 {@code OLLAMA_BASE_URL}가 Spring의 relaxed binding으로 이
+	 * 프로퍼티에 그대로 매핑되기 때문이다 — 그 변수를 export 해 둔 기계에서는
+	 * {@link OllamaJdParser}가 등록되어 이 시나리오가 성립하지 않는다.
 	 *
 	 * <p>빈 문자열은 통하지 않는다. {@code @ConditionalOnProperty}는 값이 있기만 하면 매칭하고
 	 * <b>{@code "false"}일 때만</b> 물러나므로, 환경과 무관하게 확실한 값이 {@code false}다.
+	 *
+	 * <p><b>반대쪽 값은 실제 주소지만 접속하지 않는다.</b> 이 빈들은 생성자에서 {@code RestClient}만
+	 * 만들고 첫 호출까지 연결을 열지 않는다 — 그래서 Ollama 가 떠 있지 않은 기계에서도 이 테스트가
+	 * 돈다.
 	 */
 	@Nested
-	@SpringBootTest(properties = "anthropic.api-key=false")
+	@SpringBootTest(properties = "ollama.base-url=false")
 	@Import(PostgresTestContainer.class)
-	@DisplayName("API 키가 없으면")
+	@DisplayName("Ollama 설정이 없으면")
 	class WithoutApiKey {
 
 		@Autowired
@@ -40,7 +44,7 @@ class JdParserWiringTest {
 		@Test
 		@DisplayName("폴백이 자리를 지켜 앱은 뜬다 — 캐시·이력 로직은 굴려볼 수 있다")
 		void fallbackIsRegistered() {
-			assertThat(jdParser).isNotInstanceOf(AnthropicJdParser.class);
+			assertThat(jdParser).isNotInstanceOf(OllamaJdParser.class);
 		}
 
 		@Test
@@ -53,9 +57,9 @@ class JdParserWiringTest {
 	}
 
 	@Nested
-	@SpringBootTest(properties = "anthropic.api-key=test-key-not-used")
+	@SpringBootTest(properties = "ollama.base-url=http://localhost:11434")
 	@Import(PostgresTestContainer.class)
-	@DisplayName("API 키가 있으면")
+	@DisplayName("Ollama 설정이 있으면")
 	class WithApiKey {
 
 		@Autowired
@@ -63,8 +67,8 @@ class JdParserWiringTest {
 
 		@Test
 		@DisplayName("실제 구현이 폴백을 밀어낸다")
-		void anthropicParserTakesOver() {
-			assertThat(jdParser).isInstanceOf(AnthropicJdParser.class);
+		void ollamaParserTakesOver() {
+			assertThat(jdParser).isInstanceOf(OllamaJdParser.class);
 		}
 	}
 }

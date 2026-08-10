@@ -1,18 +1,13 @@
 package com.jobit.resume;
 
-import com.anthropic.client.AnthropicClient;
-import com.anthropic.errors.AnthropicIoException;
-import com.anthropic.errors.AnthropicServiceException;
-import com.anthropic.errors.RateLimitException;
-import com.anthropic.models.messages.MessageCreateParams;
-import com.anthropic.models.messages.StructuredMessage;
-import com.anthropic.models.messages.StructuredMessageCreateParams;
-import com.anthropic.models.messages.ThinkingConfigAdaptive;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
+import com.jobit.llm.JsonSchemas;
 import com.jobit.llm.LlmCallRecorder;
 import com.jobit.llm.LlmException;
 import com.jobit.llm.LlmFeature;
 import com.jobit.llm.LlmModelConfig;
-import com.jobit.llm.StructuredOutput;
+import com.jobit.llm.OllamaChatClient;
 import java.util.ArrayList;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
@@ -23,25 +18,32 @@ import org.springframework.stereotype.Component;
 /**
  * LLM 기반 이력서 문장 분해 (스펙 §3.3).
  *
- * <p>{@code AnthropicJdParser} 와 같은 골격이다 — 구조화 출력으로 형태를 강제하고, 받은 값을
- * 서버에서 재검증한 뒤, 실패하면 재시도한다 (스펙 §6).
+ * <p>{@code OllamaJdParser} 와 같은 골격이다 — 구조화 출력으로 형태를 강제하고, 받은 값을 서버에서
+ * 재검증한 뒤, 실패하면 재시도한다 (스펙 §6).
  *
  * <p><b>다만 재검증의 목적이 다르다.</b> JD 파싱은 "빈 결과가 캐시에 굳는 것"을 막는 게 목적이지만,
  * 이력서는 캐시가 없다 (개인 자산이라 재사용 대상이 아니다). 여기서 막는 것은 <b>빈 문장</b>이다 —
  * 빈 문장을 임베딩하면 의미 없는 벡터가 갭 분석의 후보로 올라온다.
  *
  * <p><b>이 클래스는 로그에 이력서 내용을 남기지 않는다</b> (스펙 §6). 실패해도 문장 수만 남긴다.
+ *
+ * <p><b>여기가 출력 상한에 가장 먼저 닿는 기능이다.</b> 출력이 이력서 문장 전체라 입력만큼 길어서,
+ * 긴 이력서에서는 {@code num-ctx} 안에서 입력과 출력이 자리를 다툰다
+ * ({@link LlmModelConfig} 주석 참고). 잘림이 의심되면 부팅 로그가 아니라 이 클래스의 경고를 본다.
  */
 @Component
-@ConditionalOnProperty(name = "anthropic.api-key")
+@ConditionalOnProperty(name = "ollama.base-url")
 @RequiredArgsConstructor
 @Slf4j
-public class AnthropicResumeParser implements ResumeParser {
+public class OllamaResumeParser implements ResumeParser {
 
-	/** {@code AnthropicJdParser} 와 같은 값. 3회를 넘기면 비용만 늘고 결과는 거의 달라지지 않는다. */
+	/** {@code OllamaJdParser} 와 같은 값. 3회를 넘기면 대기 시간만 늘고 결과는 거의 달라지지 않는다. */
 	private static final int MAX_ATTEMPTS = 3;
 
-	private final AnthropicClient client;
+	/** 응답 역직렬화 전용. 전역 매퍼를 쓰지 않는 이유는 {@code OllamaJdParser} 주석 참고. */
+	private static final ObjectMapper MAPPER = new ObjectMapper();
+
+	private final OllamaChatClient client;
 
 	private final LlmCallRecorder callRecorder;
 
@@ -65,58 +67,55 @@ public class AnthropicResumeParser implements ResumeParser {
 				"이력서를 분석하지 못했습니다. 경력 내용이 담겨 있는지 확인해 주세요.", lastFailure);
 	}
 
+	/** 요청 조립. 테스트가 그대로 부른다 ({@code OllamaJdParser} 와 같은 이유). */
+	static OllamaChatClient.Request buildRequest(String rawText,
+			LlmModelConfig.FeatureConfig config) {
+
+		return new OllamaChatClient.Request(config.model(), ResumeParsePrompts.SYSTEM,
+				ResumeParsePrompts.userMessage(rawText), JsonSchemas.of(ResumeParseResponse.class),
+				config.effort(), config.maxTokens());
+	}
+
 	private ResumeParseResponse callAndValidate(String rawText,
 			LlmModelConfig.FeatureConfig config, int attempt) {
 
-		// effort 는 StructuredOutput.withEffort 로 건다 — outputConfig(Class) 가 effort 를
-		// 조용히 지우기 때문이다. 자세한 이유는 그쪽 주석 참고.
-		StructuredMessageCreateParams<ResumeParseResponse> params = StructuredOutput.withEffort(
-				MessageCreateParams.builder()
-					.model(config.model())
-					.maxTokens(config.maxTokens())
-					// thinking 을 끄지 않는다 — LlmModelConfig 주석 참고.
-					.thinking(ThinkingConfigAdaptive.builder().build())
-					.outputConfig(ResumeParseResponse.class)
-					// 최초 시스템 프롬프트는 top-level system 이다 (AnthropicJdParser 주석 참고).
-					.system(ResumeParsePrompts.SYSTEM)
-					.addUserMessage(ResumeParsePrompts.userMessage(rawText)),
-				config.effort());
-
-		long startedAt = System.nanoTime();
-		StructuredMessage<ResumeParseResponse> message;
+		OllamaChatClient.Completion completion;
 		try {
-			message = client.messages().create(params);
+			completion = client.chat(buildRequest(rawText, config));
 		}
-		catch (RateLimitException ex) {
-			throw new LlmException(LlmException.Kind.RATE_LIMIT,
-					"요청이 몰려 잠시 처리할 수 없습니다. 잠시 후 다시 시도해 주세요.", ex);
-		}
-		catch (AnthropicIoException ex) {
+		catch (OllamaChatClient.OllamaCallException ex) {
 			throw new LlmException(LlmException.Kind.UPSTREAM,
 					"이력서 분석 서비스에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.", ex);
 		}
-		catch (AnthropicServiceException ex) {
-			throw new LlmException(LlmException.Kind.UPSTREAM,
-					"이력서 분석 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.", ex);
+
+		// 재시도도 실제로 시간을 쓰므로 시도마다 기록한다.
+		callRecorder.record(LlmFeature.RESUME_PARSE, config.model(),
+				completion.usage().inputTokens(), completion.usage().outputTokens(), false,
+				completion.latencyMs());
+
+		if (completion.truncated()) {
+			log.warn("응답이 출력 상한에 걸려 잘렸습니다 (maxTokens={}). 이력서가 길면 "
+					+ "jobit.llm.ollama.num-ctx 와 함께 올려야 합니다.", config.maxTokens());
 		}
-		long latencyMs = (System.nanoTime() - startedAt) / 1_000_000;
 
-		// 재시도도 실제로 돈이 나가므로 시도마다 기록한다.
-		callRecorder.record(LlmFeature.RESUME_PARSE, config.model(), message.usage(), false,
-				latencyMs);
-
-		ResumeParseResponse response = extractContent(message);
+		ResumeParseResponse response = read(completion.content());
 		validate(response, attempt);
 		return response;
 	}
 
-	private ResumeParseResponse extractContent(StructuredMessage<ResumeParseResponse> message) {
-		return message.content()
-			.stream()
-			.flatMap(block -> block.text().stream())
-			.map(text -> text.text())
-			.findFirst()
-			.orElseThrow(() -> new InvalidResponseException("응답에 본문이 없습니다"));
+	/** 실패를 재시도 대상으로 던진다 ({@code OllamaJdParser} 와 같은 판단). */
+	private ResumeParseResponse read(String content) {
+		if (content == null || content.isBlank()) {
+			throw new InvalidResponseException("응답에 본문이 없습니다");
+		}
+		try {
+			return MAPPER.readValue(content, ResumeParseResponse.class);
+		}
+		catch (JacksonException ex) {
+			// **원문이 섞일 수 있는 메시지는 남기지 않는다** — 파싱 오류 메시지에는 입력 조각이
+			// 들어갈 수 있고, 여기서 그건 이력서 내용이다 (스펙 §6).
+			throw new InvalidResponseException("응답이 JSON 이 아닙니다");
+		}
 	}
 
 	/**

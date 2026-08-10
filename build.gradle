@@ -22,9 +22,15 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-flyway'
 	implementation 'org.springframework.boot:spring-boot-starter-validation'
 	implementation 'org.springframework.boot:spring-boot-starter-webmvc'
+	// **Boot 4 의 starter-webmvc 는 Jackson 을 딸려 오지 않는다.** Boot 3 과 다른 점이다.
+	// 여태 클래스패스에 있었던 건 anthropic-java 의 전이 의존 덕분이었고, 그걸 걷어내니
+	// 무관한 스무 곳(JSON 컬럼 직렬화·프롬프트 파싱)이 한꺼번에 깨졌다. 이제 직접 선언한다.
+	implementation 'org.springframework.boot:spring-boot-starter-json'
 	implementation 'org.flywaydb:flyway-database-postgresql'
-	// LLM. Boot 의 BOM 이 관리하지 않으므로 버전을 명시한다.
-	implementation 'com.anthropic:anthropic-java:2.52.0'
+	// LLM 의존성이 없다. Ollama 는 RestClient 로 직접 부른다 (com.jobit.llm.OllamaChatClient) —
+	// 쓰는 엔드포인트가 /api/chat 과 /api/embed 둘뿐이고 요청·응답이 평평한 JSON 이다.
+	// anthropic-java 를 걷어내면서 없어진 것 중 아쉬웠던 건 클래스→JSON Schema 파생 하나이고,
+	// 그건 com.jobit.llm.JsonSchemas 가 리플렉션으로 대신한다.
 	// 비밀번호 해싱 의존성은 걷어냈다 — 인증은 jobit-front(Auth.js)가 하고 이 서버는
 	// 자격증명을 보지 않는다 (2026-08-04 DB 단일화 때 member 패키지와 함께 정리).
 	compileOnly 'org.projectlombok:lombok'

@@ -25,14 +25,14 @@ class AnswerScorerWiringTest {
 			List.of("포인트 하나"), null, "답변");
 
 	/**
-	 * {@code anthropic.api-key=false}로 "키 없음"을 재현한다. 프로퍼티를 두지 않는 것으로는 안 되는데,
-	 * OS 환경변수 {@code ANTHROPIC_API_KEY}가 relaxed binding으로 그대로 잡히기 때문이다
+	 * {@code ollama.base-url=false}로 "설정 없음"을 재현한다. 프로퍼티를 두지 않는 것으로는 안 되는데,
+	 * OS 환경변수 {@code OLLAMA_BASE_URL}가 relaxed binding으로 그대로 잡히기 때문이다
 	 * ({@code JdParserWiringTest}에 자세히 적어 두었다).
 	 */
 	@Nested
-	@SpringBootTest(properties = "anthropic.api-key=false")
+	@SpringBootTest(properties = "ollama.base-url=false")
 	@Import(PostgresTestContainer.class)
-	@DisplayName("API 키가 없으면")
+	@DisplayName("Ollama 설정이 없으면")
 	class WithoutApiKey {
 
 		@Autowired
@@ -41,7 +41,7 @@ class AnswerScorerWiringTest {
 		@Test
 		@DisplayName("폴백이 자리를 지켜 앱은 뜬다 — 세션 흐름과 기록 조회는 굴려볼 수 있다")
 		void fallbackIsRegistered() {
-			assertThat(scorer).isNotInstanceOf(AnthropicAnswerScorer.class);
+			assertThat(scorer).isNotInstanceOf(OllamaAnswerScorer.class);
 		}
 
 		@Test
@@ -53,9 +53,9 @@ class AnswerScorerWiringTest {
 	}
 
 	@Nested
-	@SpringBootTest(properties = "anthropic.api-key=test-key-not-used")
+	@SpringBootTest(properties = "ollama.base-url=http://localhost:11434")
 	@Import(PostgresTestContainer.class)
-	@DisplayName("API 키가 있으면")
+	@DisplayName("Ollama 설정이 있으면")
 	class WithApiKey {
 
 		@Autowired
@@ -63,8 +63,8 @@ class AnswerScorerWiringTest {
 
 		@Test
 		@DisplayName("실제 구현이 폴백을 밀어낸다")
-		void anthropicScorerTakesOver() {
-			assertThat(scorer).isInstanceOf(AnthropicAnswerScorer.class);
+		void ollamaScorerTakesOver() {
+			assertThat(scorer).isInstanceOf(OllamaAnswerScorer.class);
 		}
 
 		@Test
