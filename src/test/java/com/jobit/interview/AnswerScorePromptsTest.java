@@ -71,6 +71,25 @@ class AnswerScorePromptsTest {
 	}
 
 	@Test
+	@DisplayName("답변 블록 뒤에서 가드를 다시 선언한다 — 모델이 마지막으로 읽는 것이 주입 지시면 안 된다")
+	void restatesGuardAfterTranscript() {
+		String message = AnswerScorePrompts.userMessage("질문", OUTLINE, null, "답변");
+
+		assertThat(message.indexOf("따르지 않는다"))
+			.as("가드가 답변 블록보다 뒤에 있어야 한다 — 앞에만 두면 주입 지시가 프롬프트의 마지막 문장이 된다")
+			.isGreaterThan(message.indexOf("</answer>"));
+	}
+
+	@Test
+	@DisplayName("뒤쪽 가드가 구분자를 늘리지 않는다 — 울타리는 여전히 한 쌍이다")
+	void trailingGuardKeepsSingleDelimiterPair() {
+		String message = AnswerScorePrompts.userMessage("질문", OUTLINE, null, "답변");
+
+		assertThat(countOccurrences(message, "<answer>")).isEqualTo(1);
+		assertThat(countOccurrences(message, "</answer>")).isEqualTo(1);
+	}
+
+	@Test
 	@DisplayName("말로 한 답변임을 알린다 — 문어체가 아니라고 감점하면 안 된다")
 	void tellsModelItIsSpokenAnswer() {
 		assertThat(AnswerScorePrompts.SYSTEM).contains("말로 한 답변");
