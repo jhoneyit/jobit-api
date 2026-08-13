@@ -25,6 +25,12 @@ import org.junit.jupiter.api.Test;
  */
 class JsonSchemasTest {
 
+	/** 실제로 모델에게 나가는 응답 타입 넷. 새 기능이 늘면 여기에 더한다. */
+	private static final List<Class<?>> PRODUCTION_TYPES = List.of(com.jobit.jd.JdParseResponse.class,
+			com.jobit.resume.ResumeParseResponse.class,
+			com.jobit.interview.AnswerScoreResponse.class,
+			com.jobit.question.QuestionGenResponse.class);
+
 	@Nested
 	@DisplayName("파생 규칙")
 	class DerivationRules {
@@ -37,7 +43,8 @@ class JsonSchemasTest {
 			assertThat(schema).containsEntry("type", "object")
 				.containsEntry("additionalProperties", false);
 			assertThat(schema.get("required")).asInstanceOf(LIST)
-				.containsExactly("name", "count", "boxedCount", "kind", "tags", "nested");
+				.containsExactly("name", "count", "boxedCount", "kind", "tags", "boundedTags",
+						"nested");
 		}
 
 		/**
@@ -109,6 +116,74 @@ class JsonSchemasTest {
 	}
 
 	/**
+	 * <b>상한 없는 배열은 문법이 종료를 강제하지 못한다.</b> Ollama 는 스키마를 GBNF 로 바꾸므로
+	 * {@code maxItems} 가 없으면 "원소를 하나 더" 가 언제나 합법이고, 모델이 반복에 빠지면 출력
+	 * 상한까지 간다 — 2026-08-13 JD 파싱이 같은 문구를 100번 내며 4,000토큰을 태운 실패다.
+	 */
+	@Nested
+	@DisplayName("배열 상한")
+	class ArrayBounds {
+
+		@Test
+		@DisplayName("@MaxItems 가 maxItems 로 실린다")
+		void carriesMaxItems() {
+			assertThat(propertiesOf(Sample.class).get("boundedTags")).asInstanceOf(MAP)
+				.containsEntry("maxItems", 3);
+		}
+
+		@Test
+		@DisplayName("애너테이션이 없으면 상한을 지어내지 않는다")
+		void omitsMaxItemsWhenUnannotated() {
+			assertThat(propertiesOf(Sample.class).get("tags")).asInstanceOf(MAP)
+				.doesNotContainKey("maxItems");
+		}
+
+		/**
+		 * 조용히 무시하면 "상한을 걸어 뒀다"고 믿는 채로 상한 없는 스키마가 나간다 —
+		 * 이 애너테이션이 막으려는 상황이 정확히 그것이다.
+		 */
+		@Test
+		@DisplayName("배열이 아닌 필드에 붙으면 거부한다")
+		void rejectsMaxItemsOnNonArray() {
+			assertThatThrownBy(() -> JsonSchemas.of(BadBound.class))
+				.isInstanceOf(IllegalArgumentException.class)
+				.hasMessageContaining("notAList");
+		}
+
+		/**
+		 * 새 배열 필드를 상한 없이 추가하면 여기서 걸린다. 중첩까지 훑는 이유는 실제로 터진 자리가
+		 * 최상위가 아니라 {@code JdParseResponse.parsed.keywords} 였기 때문이다.
+		 */
+		@Test
+		@DisplayName("실제 응답 타입의 모든 배열에 상한이 있다 — 중첩된 것까지")
+		void productionArraysAreBounded() {
+			for (Class<?> type : PRODUCTION_TYPES) {
+				assertBounded(type.getSimpleName(), JsonSchemas.of(type));
+			}
+		}
+
+		@SuppressWarnings("unchecked")
+		private void assertBounded(String path, Map<String, Object> schema) {
+			if (isArray(schema)) {
+				assertThat(schema)
+					.as("%s 에 @MaxItems 가 없다 — 모델이 반복에 빠지면 출력 상한까지 간다", path)
+					.containsKey("maxItems");
+				assertBounded(path + "[]", (Map<String, Object>) schema.get("items"));
+				return;
+			}
+			if (schema.get("properties") instanceof Map<?, ?> properties) {
+				properties.forEach((field, nested) -> assertBounded(path + "." + field,
+						(Map<String, Object>) nested));
+			}
+		}
+
+		private boolean isArray(Map<String, Object> schema) {
+			Object type = schema.get("type");
+			return type instanceof List<?> types ? types.contains("array") : "array".equals(type);
+		}
+	}
+
+	/**
 	 * <b>여기가 이 테스트의 핵심이다.</b> {@code @JsonPropertyDescription} 은 장식이 아니라
 	 * 프롬프트의 일부라는 규약이 응답 record 들에 걸려 있다. 그 규약은 이 파생이 설명을 실어
 	 * 날라야만 성립하는데, 애너테이션의 {@code @Target} 에 {@code RECORD_COMPONENT} 가 없으면
@@ -145,12 +220,7 @@ class JsonSchemasTest {
 		@Test
 		@DisplayName("실제 응답 타입의 모든 최상위 필드에 설명이 붙어 있다")
 		void productionResponsesAreFullyDescribed() {
-			List<Class<?>> types = List.of(com.jobit.jd.JdParseResponse.class,
-					com.jobit.resume.ResumeParseResponse.class,
-					com.jobit.interview.AnswerScoreResponse.class,
-					com.jobit.question.QuestionGenResponse.class);
-
-			for (Class<?> type : types) {
+			for (Class<?> type : PRODUCTION_TYPES) {
 				propertiesOf(type).forEach((field, schema) -> assertThat(schema).asInstanceOf(MAP)
 					.as("%s.%s 에 @JsonPropertyDescription 이 없다 — 모델은 이름만 보고 추측한다",
 							type.getSimpleName(), field)
@@ -165,7 +235,8 @@ class JsonSchemasTest {
 	}
 
 	private record Sample(@JsonPropertyDescription("이름. 없으면 null") String name, int count,
-			Integer boxedCount, Kind kind, List<String> tags, Nested nested) {
+			Integer boxedCount, Kind kind, List<String> tags, @MaxItems(3) List<String> boundedTags,
+			Nested nested) {
 
 		enum Kind {
 
@@ -175,5 +246,8 @@ class JsonSchemasTest {
 
 		record Nested(@JsonPropertyDescription("안쪽 값") String inner) {
 		}
+	}
+
+	private record BadBound(@MaxItems(3) String notAList) {
 	}
 }
