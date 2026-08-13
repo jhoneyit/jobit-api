@@ -35,6 +35,13 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <p>모든 필드는 {@code required} 에 들어가고 {@code additionalProperties} 는 {@code false} 다 —
  * 키가 있다는 것과 값이 널이 아니라는 것은 다른 이야기고, 여기서 강제하는 것은 앞쪽이다.
+ *
+ * <h2>배열 상한</h2>
+ *
+ * <b>{@link MaxItems} 를 붙인 배열은 {@code maxItems} 를 싣는다.</b> 응답 record 들에 "개수 제약은
+ * 구조화 출력이 지원하지 않는다"고 적혀 있던 것은 <b>Anthropic 시절의 사실이고 Ollama 에는 맞지
+ * 않는다</b> — 저쪽은 스키마를 GBNF 로 바꾸면서 개수 제약까지 문법에 반영한다. 상한 없는 배열이
+ * 실제로 폭주를 일으켰으므로({@link MaxItems} 주석 참고) 이제 배열에는 상한을 건다.
  */
 public final class JsonSchemas {
 
@@ -64,6 +71,7 @@ public final class JsonSchemas {
 
 		for (RecordComponent component : type.getRecordComponents()) {
 			Map<String, Object> property = schemaFor(component.getGenericType());
+			applyMaxItems(component, property);
 			String description = descriptionOf(component);
 			if (description != null) {
 				property.put("description", description);
@@ -107,6 +115,39 @@ public final class JsonSchemas {
 		catch (NoSuchFieldException ex) {
 			return null;
 		}
+	}
+
+	/**
+	 * {@link MaxItems} 를 {@code maxItems} 로 옮긴다.
+	 *
+	 * <p><b>{@link #descriptionOf} 와 달리 한 군데만 본다.</b> 이 애너테이션은 우리 것이라
+	 * {@code @Target} 에 {@code RECORD_COMPONENT} 를 직접 넣어 뒀고, 그래서 리플렉션 경로가 갈리는
+	 * 문제가 애초에 생기지 않는다.
+	 *
+	 * <p><b>배열이 아닌 필드에 붙으면 던진다.</b> 조용히 무시하면 "상한을 걸어 뒀다"고 믿는 채로
+	 * 상한 없는 스키마가 나간다 — 이 애너테이션이 막으려는 상황이 정확히 그것이다.
+	 */
+	private static void applyMaxItems(RecordComponent component, Map<String, Object> property) {
+		MaxItems bound = component.getAnnotation(MaxItems.class);
+		if (bound == null) {
+			return;
+		}
+		if (!isArray(property)) {
+			throw new IllegalArgumentException("@MaxItems 는 List 필드에만 붙일 수 있다: %s.%s"
+				.formatted(component.getDeclaringRecord().getSimpleName(), component.getName()));
+		}
+		if (bound.value() < 1) {
+			throw new IllegalArgumentException("@MaxItems 는 1 이상이어야 한다: %s.%s = %d"
+				.formatted(component.getDeclaringRecord().getSimpleName(), component.getName(),
+						bound.value()));
+		}
+		property.put("maxItems", bound.value());
+	}
+
+	/** 널 허용 배열은 {@code type} 이 목록({@code ["array","null"]})이라 문자열 비교로는 안 걸린다. */
+	private static boolean isArray(Map<String, Object> property) {
+		Object type = property.get("type");
+		return type instanceof List<?> types ? types.contains("array") : "array".equals(type);
 	}
 
 	private static Map<String, Object> schemaFor(Type type) {

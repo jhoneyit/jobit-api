@@ -2,6 +2,7 @@ package com.jobit.question;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonPropertyDescription;
+import com.jobit.llm.MaxItems;
 import java.util.List;
 
 /**
@@ -10,12 +11,15 @@ import java.util.List;
  * <p>{@code @JsonPropertyDescription}은 <b>장식이 아니라 프롬프트의 일부</b>다. 스키마에 실려
  * 모델에게 전달되므로, 필드 의미가 바뀌면 여기부터 고친다.
  *
- * <p>개수 제약(질문 10개 등)은 여기 넣지 않는다 — 구조화 출력이 지원하지 않는다.
- * 그런 규칙은 {@link QuestionGenPrompts#SYSTEM}에 글로 적는다.
+ * <p><b>배열의 상한은 {@link MaxItems}로 건다.</b> "구조화 출력이 지원하지 않는다"고 적혀 있던 것은
+ * Anthropic 시절의 사실이고, Ollama 는 개수 제약까지 GBNF 문법에 반영한다. 정확한 개수
+ * ({@link QuestionGenPrompts#QUESTION_COUNT}개)는 여전히 문법으로 못 박을 수 없으므로
+ * {@link QuestionGenPrompts#SYSTEM}에 글로 적는다 — 여기서 거는 것은 <b>폭주를 끊는 천장</b>이다.
  */
 public record QuestionGenResponse(
 
-		@JsonPropertyDescription("면접 질문 목록") List<RawQuestion> questions) {
+		// QUESTION_COUNT(10)의 두 배. 정확한 개수는 프롬프트가 맡고 여기는 천장만 맡는다.
+		@MaxItems(20) @JsonPropertyDescription("면접 질문 목록") List<RawQuestion> questions) {
 
 	/**
 	 * 스트리밍 중에는 이 타입으로 원소 하나씩 역직렬화한다.
@@ -37,10 +41,10 @@ public record QuestionGenResponse(
 
 			@JsonPropertyDescription("1=신입도 답할 수준, 5=시니어에게도 어려움") Integer difficulty,
 
-			@JsonPropertyDescription("면접관이 이어서 물을 꼬리질문 1~3개") List<String> followups,
+			@MaxItems(3) @JsonPropertyDescription("면접관이 이어서 물을 꼬리질문 1~3개") List<String> followups,
 
 			@JsonPropertyDescription("답변 뼈대. 완성된 답변이 아니라 '무엇을 짚어야 하는지' "
-					+ "핵심 포인트 2~4개") List<String> answerOutline) {
+					+ "핵심 포인트 2~4개") @MaxItems(4) List<String> answerOutline) {
 
 		/**
 		 * 서버측 재검증 (스펙 §6).

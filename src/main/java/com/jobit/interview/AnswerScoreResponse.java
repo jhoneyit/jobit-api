@@ -1,6 +1,7 @@
 package com.jobit.interview;
 
 import com.fasterxml.jackson.annotation.JsonPropertyDescription;
+import com.jobit.llm.MaxItems;
 import java.util.List;
 
 /**
@@ -17,7 +18,9 @@ public record AnswerScoreResponse(
 
 		@JsonPropertyDescription("0~100 점수. 짚은 항목 비율에서 시작하되 답변의 깊이를 반영한다") int score,
 
-		@JsonPropertyDescription("답변이 실제로 짚은 답변 뼈대 항목의 인덱스 배열 (0부터). "
+		// 실제 상한은 뼈대 항목 수(보통 2~4)지만 스키마는 그걸 모른다. 범위 밖 인덱스는
+		// AnswerScoreNormalizer 가 버리므로, 여기서는 같은 인덱스를 반복하는 폭주만 끊으면 된다.
+		@MaxItems(20) @JsonPropertyDescription("답변이 실제로 짚은 답변 뼈대 항목의 인덱스 배열 (0부터). "
 				+ "확신이 없으면 넣지 않는다") List<Integer> covered,
 
 		@JsonPropertyDescription("한국어 한두 문장. 무엇이 좋았고 무엇이 빠졌는지만 말한다. "
