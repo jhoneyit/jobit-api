@@ -36,10 +36,14 @@ class GapWiringTest {
 		@Autowired
 		private GapJudge judge;
 
+		@Autowired
+		private Rewriter rewriter;
+
 		@Test
 		@DisplayName("폴백이 자리를 지켜 앱은 뜬다 — 캐시된 분석 결과 조회는 굴려볼 수 있다")
 		void fallbackIsRegistered() {
 			assertThat(judge).isNotInstanceOf(OllamaGapJudge.class);
+			assertThat(rewriter).isNotInstanceOf(OllamaRewriter.class);
 		}
 
 		@Test
@@ -47,6 +51,13 @@ class GapWiringTest {
 		void fallbackThrowsWhenCalled() {
 			assertThatThrownBy(() -> judge.judge(REQUEST))
 				.isInstanceOf(GapJudgeFallbackConfig.GapJudgeNotConfiguredException.class);
+		}
+
+		@Test
+		@DisplayName("리라이트 폴백도 예외를 던진다 — 빈 제안이 항목당 하나뿐인 자리에 굳으면 안 된다")
+		void rewriterFallbackThrowsWhenCalled() {
+			assertThatThrownBy(() -> rewriter.rewrite(new Rewriter.Request("요구사항", "이유", "문장")))
+				.isInstanceOf(RewriterFallbackConfig.RewriterNotConfiguredException.class);
 		}
 	}
 
@@ -59,10 +70,14 @@ class GapWiringTest {
 		@Autowired
 		private GapJudge judge;
 
+		@Autowired
+		private Rewriter rewriter;
+
 		@Test
 		@DisplayName("실제 구현이 폴백을 밀어낸다")
 		void ollamaJudgeTakesOver() {
 			assertThat(judge).isInstanceOf(OllamaGapJudge.class);
+			assertThat(rewriter).isInstanceOf(OllamaRewriter.class);
 		}
 
 		@Test

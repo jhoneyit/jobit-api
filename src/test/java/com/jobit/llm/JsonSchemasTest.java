@@ -30,7 +30,7 @@ class JsonSchemasTest {
 			com.jobit.resume.ResumeParseResponse.class,
 			com.jobit.interview.AnswerScoreResponse.class,
 			com.jobit.question.QuestionGenResponse.class,
-			com.jobit.gap.GapJudgeResponse.class);
+			com.jobit.gap.GapJudgeResponse.class, com.jobit.gap.RewriteResponse.class);
 
 	@Nested
 	@DisplayName("파생 규칙")

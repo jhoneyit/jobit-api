@@ -35,9 +35,9 @@ public final class GapView {
 			Evidence evidence = item.getEvidenceBullet() == null ? null
 					: new Evidence(item.getEvidenceBullet().getId(),
 							item.getEvidenceBullet().getText());
-			items.add(new Item(item.getRequirement().getId(), item.getRequirement().getText(),
-					item.getRequirement().getKind(), item.getStatus(), evidence,
-					item.getRationale()));
+			items.add(new Item(item.getId(), item.getRequirement().getId(),
+					item.getRequirement().getText(), item.getRequirement().getKind(),
+					item.getStatus(), evidence, item.getRationale()));
 		}
 
 		GapAnalysis analysis = result.analysis();
@@ -57,10 +57,13 @@ public final class GapView {
 	}
 
 	/**
+	 * @param gapItemId 리라이트 진입점이다 — {@code POST /api/gap-items/{gapItemId}/rewrite}.
+	 *                  이 값이 없으면 프론트가 WEAK 행에서 수정안을 요청할 방법이 없다
+	 *                  (실제로 빠뜨린 채 나갔다가 종단 확인에서 걸렸다, 2026-08-14)
 	 * @param evidence {@code MISSING} 이면 null — "근거 없음"을 그대로 노출한다 (스펙 §4.5)
 	 */
-	public record Item(UUID requirementId, String requirementText, Requirement.Kind kind,
-			GapItem.Status status, Evidence evidence, String rationale) {
+	public record Item(UUID gapItemId, UUID requirementId, String requirementText,
+			Requirement.Kind kind, GapItem.Status status, Evidence evidence, String rationale) {
 	}
 
 	public record Evidence(UUID bulletId, String text) {
