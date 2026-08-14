@@ -25,11 +25,12 @@ import org.junit.jupiter.api.Test;
  */
 class JsonSchemasTest {
 
-	/** 실제로 모델에게 나가는 응답 타입 넷. 새 기능이 늘면 여기에 더한다. */
+	/** 실제로 모델에게 나가는 응답 타입 전부. 새 기능이 늘면 여기에 더한다. */
 	private static final List<Class<?>> PRODUCTION_TYPES = List.of(com.jobit.jd.JdParseResponse.class,
 			com.jobit.resume.ResumeParseResponse.class,
 			com.jobit.interview.AnswerScoreResponse.class,
-			com.jobit.question.QuestionGenResponse.class);
+			com.jobit.question.QuestionGenResponse.class,
+			com.jobit.gap.GapJudgeResponse.class);
 
 	@Nested
 	@DisplayName("파생 규칙")
