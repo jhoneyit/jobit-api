@@ -7,7 +7,7 @@
 면접 연습 6종 ✅ (`POST /api/interviews` · `.../answers` · `.../finish` ·
 `GET /api/interviews` · `GET·DELETE /api/interviews/{id}` · `POST /api/interviews/claim`) /
 이력서 5종 ✅ (`POST /api/resumes` · `GET /api/resumes` · `GET·DELETE /api/resumes/{id}` ·
-`POST /api/resumes/claim`)
+`POST /api/resumes/claim`) / 갭 분석 2종 ✅ (`POST·GET /api/gap-analyses`)
 
 ## 공통 규약
 
@@ -363,6 +363,79 @@ ID를 넣어 보는 것만으로 남의 이력 존재 여부를 훑을 수 있�
 
 ---
 
+## 갭 분석 (스펙 §4.3, §4.5) ✅
+
+이력서 × 공고 조합마다 요구사항별로 `MET`(충족) / `WEAK`(약함) / `MISSING`(근거 없음)을 판정한다.
+2단계 구조다 — 임베딩이 요구사항마다 이력서 문장 후보 3개를 추리고, LLM 은 판정만 한다.
+
+모두 `X-Owner-Key` 필수. **이력서가 내 것이어야 한다** — 남의 것이면 404 다. 공고는 전역 캐시
+자산이라 소유자 검사가 없다.
+
+### `POST /api/gap-analyses` — 분석 실행 (또는 기존 결과 반환) ✅
+
+```jsonc
+{ "resumeId": "uuid", "jobPostingId": "uuid" }   // 둘 다 필수
+```
+
+**응답 `200`**
+
+```jsonc
+{
+  "gapAnalysisId": "uuid",
+  "cached": false,                    // true 면 LLM 을 부르지 않고 기존 결과를 돌려준 것
+  "createdAt": "2026-08-14T00:00:00Z",
+  "summary": { "met": 8, "weak": 3, "missing": 2 },   // 제출 이력의 gapSummary 와 같은 형태
+  "items": [                          // 요구사항 순서 (공고에 나온 순서)
+    {
+      "requirementId": "uuid",
+      "requirementText": "RDBMS 스키마 설계와 쿼리 튜닝 경험",
+      "kind": "REQUIRED",             // REQUIRED | PREFERRED | RESPONSIBILITY
+      "status": "MET",                // MET | WEAK | MISSING
+      "evidence": {                   // 근거가 된 이력서 문장. MISSING 이면 null
+        "bulletId": "uuid",
+        "text": "정산 테이블 인덱스 재설계로 배치 시간을 40% 단축"
+      },
+      "rationale": "스키마 설계와 튜닝 경험이 수치와 함께 드러난다"
+    }
+  ]
+}
+```
+
+**느리다.** 판정이 요구사항 수만큼 반복되어 **몇 분**이 걸릴 수 있다 — 프론트는 로딩 상태를
+반드시 보여 줘야 한다. 캐시 적중이면 즉시 돌아온다.
+
+**같은 조합은 재분석하지 않는다** (`(resumeId, jobPostingId)` 유니크). 이력서를 고쳤다면 새로
+올리면 되고, 새 이력서는 새 `resumeId` 라 캐시 키가 자연히 갈린다 — 이력서에 수정 개념이 없는
+것이 캐시 무효화 문제를 없앤다.
+
+**`MISSING` 은 `evidence` 가 `null` 이다.** 지어내지 않는다 (스펙 §4.5) — 화면은 "충족 근거가
+없습니다. 면접에서 물어볼 가능성이 높으니 인접 경험으로 준비하세요"를 안내하고 질문 생성으로
+넘긴다.
+
+**공고 메타(회사·직함)는 싣지 않는다.** 이 화면에 오기 전에 파싱 응답이나 제출 이력에서 이미
+알고 있는 값이다.
+
+**에러**
+
+| 상태 | 상황 |
+| --- | --- |
+| `400` | `resumeId`/`jobPostingId` 누락, `X-Owner-Key` 누락·형식 위반 |
+| `404` | 이력서가 없거나 남의 것, 공고가 없음 |
+| `409` | 이력서에 임베딩이 없음 (V11 이전 업로드) — **다시 올려야 한다**. 문구가 그걸 안내한다 |
+| `429` | 소유자별 시간당 한도 (`Retry-After` 포함). 분석 1건 = 한도 1회 소비, 캐시 적중은 소비 없음 |
+| `502` | LLM 장애 |
+| `500` | `ollama.base-url` 미설정 (`"갭 분석 기능이 아직 설정되지 않았습니다."`) |
+
+### `GET /api/gap-analyses?resumeId=...&jobPostingId=...` — 캐시된 결과 조회 ✅
+
+**응답 `200`**: POST 와 같은 형태 (`cached` 는 항상 `true`).
+
+**없으면 `404` — 분석을 시작하지 않는다.** GET 이 분석까지 해 버리면 재방문 화면을 그리려던
+프론트가 의도치 않게 몇 분짜리 LLM 경로를 태우고 한도까지 소비한다. 시작은 언제나 명시적인
+POST 다. 프론트는 404 를 "아직 분석 안 함"으로 읽고 분석 버튼을 보여 준다.
+
+---
+
 ## 면접 연습 (docs/interview-practice-design.md)
 
 **오디오를 받지 않는다.** STT는 브라우저(Web Speech API)가 하고 이 서버로는 텍스트만 온다.
@@ -648,11 +721,7 @@ GET /api/interviews?page=0&size=20
 
 로드맵 3단계 이후(스펙 §5). 해당 단계에 들어갈 때 여기에 적는다.
 
-- 갭 분석 (§4.3) — **선행 조건은 전부 갖춰졌다.** 이력서 문장과 벡터가 저장되고
-  `ResumeBulletEmbeddingRepository.findNearest` 가 요구사항별 후보 상위 N개를 뽑는다.
-  남은 것은 "요구사항 1개 + 후보 3개 → MET/WEAK/MISSING 판정" LLM 경로와 `gap_item` 저장이다.
-  목록의 `gapSummary`가 채워지는 것도 이때다
-- 리라이트 (§4.4) — 갭 분석의 WEAK 항목이 입력이라 그쪽이 먼저다.
+- 리라이트 (§4.4) — 갭 분석의 WEAK 항목이 입력이다 (갭 분석은 2026-08-14 완료 — 위 "갭 분석").
   이력서 원문 복호화 경로가 열리는 유일한 지점이기도 하다
 - 이력 **상세**·메모 수정 — `JdSubmissionService.getOwned`/`updateMemo`는 있고 경로가 없다.
   화면(§4.6)이 아직 목록만 쓰므로 계약을 먼저 만들지 않았다

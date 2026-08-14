@@ -1,5 +1,7 @@
 package com.jobit.common;
 
+import com.jobit.gap.GapAnalysisService;
+import com.jobit.gap.GapJudgeFallbackConfig.GapJudgeNotConfiguredException;
 import com.jobit.interview.AnswerScorerFallbackConfig.AnswerScorerNotConfiguredException;
 import com.jobit.interview.InterviewService;
 import com.jobit.jd.JdParserFallbackConfig.JdParserNotConfiguredException;
@@ -143,6 +145,28 @@ public class ApiExceptionHandler {
 			AnswerScorerNotConfiguredException ex) {
 		log.error("AnswerScorer 구현이 없습니다. ollama.base-url 설정을 확인하세요.", ex);
 		return body(HttpStatus.INTERNAL_SERVER_ERROR, "답변 채점 기능이 아직 설정되지 않았습니다.");
+	}
+
+	/** 갭 판정 구현이 없는 상태. 위와 같은 이유로 5xx다. */
+	@ExceptionHandler(GapJudgeNotConfiguredException.class)
+	public ResponseEntity<Map<String, String>> handleGapJudgeMissing(
+			GapJudgeNotConfiguredException ex) {
+		log.error("GapJudge 구현이 없습니다. ollama.base-url 설정을 확인하세요.", ex);
+		return body(HttpStatus.INTERNAL_SERVER_ERROR, "갭 분석 기능이 아직 설정되지 않았습니다.");
+	}
+
+	/**
+	 * 벡터가 하나도 없는 이력서로 갭 분석을 시도했다 — V11 이전에 올렸거나 임베딩이 유실된 경우.
+	 *
+	 * <p>사용자가 할 일이 분명하므로(이력서를 다시 올린다) 문구가 다음 행동을 가리킨다.
+	 * 상태는 409 다 — 요청 형식은 맞는데 자원의 상태가 조건을 만족하지 않는 것이라, 같은 요청도
+	 * 재업로드 뒤에는 성공한다.
+	 */
+	@ExceptionHandler(GapAnalysisService.ResumeNotAnalyzableException.class)
+	public ResponseEntity<Map<String, String>> resumeNotAnalyzable(
+			GapAnalysisService.ResumeNotAnalyzableException ex) {
+		log.info("임베딩 없는 이력서로 갭 분석 시도", ex);
+		return body(HttpStatus.CONFLICT, "이 이력서는 다시 올려야 갭 분석을 할 수 있습니다. 이력서를 새로 업로드해 주세요.");
 	}
 
 	/**
