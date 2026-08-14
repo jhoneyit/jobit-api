@@ -2,12 +2,30 @@ package com.jobit.gap;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 public interface GapItemRepository extends JpaRepository<GapItem, UUID> {
+
+	/**
+	 * 리라이트 진입용 — 소유자 검사가 조회 조건에 들어간다 (docs/api.md "소유자 검사").
+	 *
+	 * <p>{@code evidenceBullet} 을 함께 fetch 한다: 리라이트가 고칠 문장이 그것이고,
+	 * 트랜잭션 밖(LLM 호출 전 조립)에서 접근하므로 지연 로딩이면 터진다.
+	 */
+	@Query("""
+			select i from GapItem i
+			join fetch i.requirement
+			left join fetch i.evidenceBullet
+			join i.gapAnalysis a
+			join a.resume r
+			where i.id = :gapItemId and r.ownerKey = :ownerKey
+			""")
+	Optional<GapItem> findOwned(@Param("gapItemId") UUID gapItemId,
+			@Param("ownerKey") String ownerKey);
 
 	/** 갭 분석 결과 화면. 요구사항 순서대로 보여준다 (스펙 §4.5). */
 	@Query("""

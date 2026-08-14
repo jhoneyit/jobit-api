@@ -2,6 +2,8 @@ package com.jobit.common;
 
 import com.jobit.gap.GapAnalysisService;
 import com.jobit.gap.GapJudgeFallbackConfig.GapJudgeNotConfiguredException;
+import com.jobit.gap.RewriteService;
+import com.jobit.gap.RewriterFallbackConfig.RewriterNotConfiguredException;
 import com.jobit.interview.AnswerScorerFallbackConfig.AnswerScorerNotConfiguredException;
 import com.jobit.interview.InterviewService;
 import com.jobit.jd.JdParserFallbackConfig.JdParserNotConfiguredException;
@@ -153,6 +155,32 @@ public class ApiExceptionHandler {
 			GapJudgeNotConfiguredException ex) {
 		log.error("GapJudge 구현이 없습니다. ollama.base-url 설정을 확인하세요.", ex);
 		return body(HttpStatus.INTERNAL_SERVER_ERROR, "갭 분석 기능이 아직 설정되지 않았습니다.");
+	}
+
+	/** 리라이트 구현이 없는 상태. 위와 같은 이유로 5xx다. */
+	@ExceptionHandler(RewriterNotConfiguredException.class)
+	public ResponseEntity<Map<String, String>> handleRewriterMissing(
+			RewriterNotConfiguredException ex) {
+		log.error("Rewriter 구현이 없습니다. ollama.base-url 설정을 확인하세요.", ex);
+		return body(HttpStatus.INTERNAL_SERVER_ERROR, "리라이트 기능이 아직 설정되지 않았습니다.");
+	}
+
+	/**
+	 * WEAK 가 아닌 항목의 리라이트 시도.
+	 *
+	 * <p>사용자가 할 일이 없는 항목이라 문구가 그걸 설명한다 — MET 은 이미 충분하고, MISSING 은
+	 * 고칠 문장 자체가 없다 (지어내지 않는다, 스펙 §4.5).
+	 */
+	@ExceptionHandler(RewriteService.NotRewritableException.class)
+	public ResponseEntity<Map<String, String>> notRewritable(
+			RewriteService.NotRewritableException ex) {
+		log.debug("WEAK 아닌 항목 리라이트 시도: {}", ex.getStatus());
+		String message = switch (ex.getStatus()) {
+			case MET -> "이미 충족한 항목이라 수정안이 필요하지 않습니다.";
+			case MISSING -> "근거 문장이 없는 항목은 수정안을 만들 수 없습니다. 면접 준비로 대비해 주세요.";
+			case WEAK -> "요청 값이 올바르지 않습니다."; // 도달 불가 — WEAK 는 거부되지 않는다
+		};
+		return body(HttpStatus.BAD_REQUEST, message);
 	}
 
 	/**
