@@ -18,8 +18,12 @@ public final class QuestionGenPrompts {
 	 *
 	 * <p><b>올리면 캐시가 통째로 무효화된다.</b> 프롬프트를 의미 있게 고칠 때만 올린다 —
 	 * 오타 수정으로 올리면 모든 공고가 다시 과금된다.
+	 *
+	 * <p>2026-08-15.1: 질문 은행 참고 절 추가 (스펙 §5). 참고는 은행 상태에 따라 달라지지만
+	 * 버전에 넣지 않는다 — 캐시 키는 "어떤 방식으로 만들었나"지 "그날 은행에 뭐가 있었나"가
+	 * 아니고, 후자를 키에 넣으면 캐시가 영영 적중하지 않는다.
 	 */
-	public static final String PROMPT_VERSION = "2026-08-02.1";
+	public static final String PROMPT_VERSION = "2026-08-15.1";
 
 	public static final int QUESTION_COUNT = 10;
 
@@ -73,7 +77,8 @@ public final class QuestionGenPrompts {
 	 *
 	 * @param parsedMeta {@code job_posting.parsed} 를 풀어 놓은 값. 없는 항목은 생략된다
 	 */
-	public static String userMessage(Map<String, Object> parsedMeta, List<Requirement> requirements) {
+	public static String userMessage(Map<String, Object> parsedMeta, List<Requirement> requirements,
+			List<String> referenceQuestions) {
 		List<String> meta = new ArrayList<>();
 		addIfPresent(meta, "회사", parsedMeta.get("company"));
 		addIfPresent(meta, "포지션", parsedMeta.get("title"));
@@ -92,10 +97,39 @@ public final class QuestionGenPrompts {
 				%s
 
 				## 요구사항 목록
-				%s
+				%s%s
 				위 요구사항을 기준으로 면접 질문 %d개를 만들어줘.""".formatted(
 				meta.isEmpty() ? "(메타데이터 없음)" : String.join("\n", meta),
-				lines.toString(), QUESTION_COUNT);
+				lines.toString(), referenceSection(referenceQuestions), QUESTION_COUNT);
+	}
+
+	/**
+	 * 질문 은행 참고 절 (스펙 §5). 은행에 비슷한 것이 없으면 절 자체를 뺀다 — 빈 절을 남기면
+	 * 모델이 "참고가 있어야 하는데 없다"는 신호로 읽는다.
+	 *
+	 * <p><b>참고는 기준이지 재료가 아니다.</b> 그대로 베끼면 요구사항이 다른데 질문만 같은
+	 * 세트가 나온다 — 규칙이 그걸 막고, 수준(용어 정의가 아닌 상황 질문)의 본보기로만 쓰게 한다.
+	 *
+	 * <p>참고 질문은 우리 모델이 생성한 텍스트지만 근원은 사용자가 붙여넣은 공고다 —
+	 * 구분자 무력화를 여기도 적용한다 (JD 본문과 같은 방어).
+	 */
+	private static String referenceSection(List<String> referenceQuestions) {
+		if (referenceQuestions == null || referenceQuestions.isEmpty()) {
+			return "";
+		}
+		StringBuilder lines = new StringBuilder();
+		for (String question : referenceQuestions) {
+			lines.append("- ")
+				.append(question.replaceAll("(?i)</?job_posting>", "[태그 제거됨]"))
+				.append('\n');
+		}
+		return """
+
+				## 비슷한 공고에서 실제로 낸 질문 (참고)
+				%s
+				이 질문들은 **수준과 형태의 기준**으로만 삼는다. 그대로 베끼지 않는다 —
+				이 공고의 요구사항에 맞을 때만 방향을 참고해 새로 만든다.
+				""".formatted(lines.toString().strip());
 	}
 
 	private static void addIfPresent(List<String> out, String label, Object value) {

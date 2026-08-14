@@ -1,5 +1,6 @@
 package com.jobit.jd;
 
+import com.jobit.llm.EmbeddingClient;
 import com.jobit.llm.LlmGuard;
 import java.util.ArrayList;
 import java.util.List;
@@ -27,7 +28,11 @@ public class JdParsingService {
 
 	private final RequirementRepository requirementRepository;
 
+	private final RequirementEmbeddingRepository embeddingRepository;
+
 	private final JdParser jdParser;
+
+	private final EmbeddingClient embeddingClient;
 
 	private final LlmGuard llmGuard;
 
@@ -83,10 +88,45 @@ public class JdParsingService {
 			requirements.add(new Requirement(posting, r.text(), r.kind(),
 					r.keywords().toArray(String[]::new), i));
 		}
-		requirementRepository.saveAll(requirements);
+		// flush 가 필요하다 — 아래 임베딩 저장은 JdbcClient UPDATE 라 JPA 영속성 컨텍스트를
+		// 보지 않는다 (ResumeService 와 같은 함정: INSERT 전이면 조용히 0건 업데이트다).
+		List<Requirement> saved = requirementRepository.saveAllAndFlush(requirements);
+		embedRequirements(saved);
 
 		log.info("JD parsed: hash={} requirements={}", contentHash, requirements.size());
 		return posting;
+	}
+
+	/**
+	 * 요구사항 임베딩 — 질문 은행(스펙 §5)의 검색 축.
+	 *
+	 * <p><b>실패해도 파싱을 죽이지 않는다.</b> 사용자가 원한 것은 파싱 결과이고 임베딩은 은행
+	 * enrichment 다 — 여기서 던지면 방금 성공한 LLM 파싱까지 롤백된다. null 로 남은 행은
+	 * 검색이 {@code embedding is not null} 로 거르고, 질문 은행에서 빠질 뿐이다.
+	 *
+	 * <p><b>개수가 어긋나도 같은 이유로 버린다.</b> 이력서 쪽은 어긋난 저장이 갭 분석을
+	 * 오염시키므로 업로드 전체를 실패시키지만, 여기는 부가 자산이라 결이 다르다.
+	 */
+	private void embedRequirements(List<Requirement> requirements) {
+		try {
+			List<String> texts = new ArrayList<>(requirements.size());
+			for (Requirement requirement : requirements) {
+				texts.add(requirement.getText());
+			}
+
+			List<float[]> vectors = embeddingClient.embedAll(texts);
+			if (vectors.size() != requirements.size()) {
+				log.warn("요구사항 임베딩 개수 불일치 ({} != {}) — 질문 은행에서 이 공고를 뺀다",
+						vectors.size(), requirements.size());
+				return;
+			}
+			for (int i = 0; i < requirements.size(); i++) {
+				embeddingRepository.updateEmbedding(requirements.get(i).getId(), vectors.get(i));
+			}
+		}
+		catch (RuntimeException ex) {
+			log.warn("요구사항 임베딩 실패 — 파싱 결과는 유지하고 질문 은행에서만 뺀다: {}", ex.toString());
+		}
 	}
 
 	@Transactional(readOnly = true)

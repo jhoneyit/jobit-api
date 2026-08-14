@@ -31,8 +31,15 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 @Slf4j
 public class QuestionController {
 
-	/** LLM 호출이 길다. 컨트롤러 응답 상한(3분)보다 넉넉히 잡는다. */
-	private static final long TIMEOUT_MS = 300_000L;
+	/**
+	 * SSE 수명 상한. <b>로컬 추론 실측으로 다시 잡았다</b> (2026-08-15) — 5분이던 시절은
+	 * Anthropic 실측 62초 기준이었는데, 로컬 qwen3:14b 는 thinking 을 켠 질문 생성이
+	 * 8~13 tok/s 로 10분을 넘겨 5분 타임아웃이 **정상 생성을 구조적으로 끊었다**
+	 * (질문 0개 시점에 끊기면 세트도 저장되지 않아, 재시도해도 같은 자리에서 또 끊긴다).
+	 * thinking 동안은 이벤트가 없어 조용한 연결이 길다 — 프록시를 앞에 두면 idle 컷을
+	 * 이 값보다 길게 잡아야 한다.
+	 */
+	private static final long TIMEOUT_MS = 1_200_000L;
 
 	private final QuestionService questionService;
 
