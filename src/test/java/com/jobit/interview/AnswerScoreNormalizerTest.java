@@ -73,9 +73,51 @@ class AnswerScoreNormalizerTest {
 	@Test
 	@DisplayName("점수는 0~100 으로 자른다 — DB CHECK 제약에 닿기 전에 맞춘다")
 	void clampsScore() {
-		assertThat(AnswerScoreNormalizer.normalize(120, List.of(), 2, "x").score()).isEqualTo(100);
-		assertThat(AnswerScoreNormalizer.normalize(-5, List.of(), 2, "x").score()).isZero();
-		assertThat(AnswerScoreNormalizer.normalize(63, List.of(), 2, "x").score()).isEqualTo(63);
+		// covered 를 꽉 채워 상한(아래 테스트)과 분리하고 클램프만 본다.
+		assertThat(AnswerScoreNormalizer.normalize(120, List.of(0, 1), 2, "x").score())
+			.isEqualTo(100);
+		assertThat(AnswerScoreNormalizer.normalize(-5, List.of(0, 1), 2, "x").score()).isZero();
+		assertThat(AnswerScoreNormalizer.normalize(63, List.of(0, 1), 2, "x").score())
+			.isEqualTo(63);
+	}
+
+	@Test
+	@DisplayName("점수는 검증된 covered 비율을 넘지 못한다 — 근거 없이 점수만 높은 응답이 여기서 잘린다")
+	void capsScoreByCoveredRatio() {
+		// 뼈대 4개 중 1개만 짚고 100점 — 주입의 전형이다. 상한 25.
+		assertThat(AnswerScoreNormalizer.normalize(100, List.of(0), 4, "x").score()).isEqualTo(25);
+		// 하나도 못 짚으면 점수도 0 이다.
+		assertThat(AnswerScoreNormalizer.normalize(100, List.of(), 4, "x").score()).isZero();
+		// 상한 아래 점수는 그대로다.
+		assertThat(AnswerScoreNormalizer.normalize(40, List.of(0, 1), 4, "x").score())
+			.isEqualTo(40);
+	}
+
+	@Test
+	@DisplayName("인용 검증 — 답변에 없는 인용이 달린 항목은 버린다 (주입 방어 2층)")
+	void dropsCoveredWithFabricatedQuotes() {
+		String transcript = "격리 수준은 네 가지가 있고, MySQL 기본은 리피터블 리드입니다.";
+
+		AnswerScorer.Score score = AnswerScoreNormalizer.normalize(100, List.of(
+				new AnswerScoreResponse.Covered(0, "격리 수준은 네 가지"),      // 원문에 있음
+				new AnswerScoreResponse.Covered(1, "팬텀 리드를 락으로 해결"),  // 지어낸 인용
+				new AnswerScoreResponse.Covered(2, "네 가지")),                // 너무 짧음
+				4, "x", transcript);
+
+		assertThat(score.covered()).containsExactly(0);
+		assertThat(score.score()).isEqualTo(25); // 검증된 1/4 이 상한이다
+	}
+
+	@Test
+	@DisplayName("인용의 공백 차이는 눈감아 준다 — 줄바꿈을 다듬어 옮긴 것까지 버리면 과하다")
+	void quoteMatchIgnoresWhitespace() {
+		String transcript = "MySQL 기본은\n리피터블 리드라서\n그대로 썼습니다";
+
+		AnswerScorer.Score score = AnswerScoreNormalizer.normalize(50, List.of(
+				new AnswerScoreResponse.Covered(0, "MySQL 기본은 리피터블 리드라서")), 2, "x",
+				transcript);
+
+		assertThat(score.covered()).containsExactly(0);
 	}
 
 	@Test

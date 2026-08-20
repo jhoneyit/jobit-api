@@ -67,7 +67,7 @@ public class OllamaAnswerScorer implements AnswerScorer {
 		AnswerScoreResponse response = call(request, config);
 
 		return AnswerScoreNormalizer.normalize(response.score(), response.covered(), outlineSize,
-				response.feedback());
+				response.feedback(), request.transcript());
 	}
 
 	/**
