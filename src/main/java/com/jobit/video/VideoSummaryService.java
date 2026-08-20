@@ -85,8 +85,10 @@ public class VideoSummaryService {
 		if (existing.isPresent()) {
 			VideoSummary summary = existing.get();
 			link(ownerKey, summary);
-			if (summary.getStatus() == VideoSummary.Status.FAILED) {
+			if (summary.getStatus() == VideoSummary.Status.FAILED
+					|| summary.getStatus() == VideoSummary.Status.REJECTED) {
 				// 재시도는 새 처리이므로 한도를 소비한다. DONE·진행 중은 소비하지 않는다.
+				// REJECTED 도 되살린다 — 판정이 틀렸다고 생각하면 다시 넣는 것이 사용자의 항의 수단이다.
 				llmGuard.checkAndConsume(ownerKey);
 				transactionTemplate.executeWithoutResult(tx -> summaryRepository
 					.findById(summary.getId())
@@ -184,9 +186,13 @@ public class VideoSummaryService {
 		update(summaryId, s -> s.start(OffsetDateTime.now(clock)));
 
 		try {
-			TranscriptService.Result transcript = transcriptService.acquire(videoId);
+			TranscriptService.Result transcript = transcriptService.acquire(videoId,
+					meta -> gate(summaryId, meta, null));
 			update(summaryId, s -> s.meta(transcript.meta().title(), transcript.meta().channel(),
 					transcript.meta().durationSec(), OffsetDateTime.now(clock)));
+
+			// 내용 판정 — 제목이 관련돼 보여도 내용이 무관하면 여기서 끊는다 (낚시 제목 방어).
+			gate(summaryId, transcript.meta(), transcriptHead(transcript.segments()));
 
 			VideoReportResponse report = summarizer
 				.summarize(new VideoSummarizer.Request(transcript.meta().title(),
@@ -200,9 +206,51 @@ public class VideoSummaryService {
 					OffsetDateTime.now(clock)));
 			log.info("영상 요약 완료: video={} source={}", videoId, source);
 		}
+		catch (RejectedException ex) {
+			update(summaryId, s -> s.reject(ex.getMessage(), OffsetDateTime.now(clock)));
+			log.info("영상 요약 거부(주제 게이트): video={} — {}", videoId, ex.getMessage());
+		}
 		catch (Exception ex) {
 			update(summaryId, s -> s.fail(userMessage(ex), OffsetDateTime.now(clock)));
 			log.warn("영상 요약 실패: video={} — {}", videoId, ex.toString());
+		}
+	}
+
+	/**
+	 * 주제 게이트 — 무관하면 {@link RejectedException} 으로 흐름을 끊는다.
+	 *
+	 * <p>메타 단계({@code transcriptHead == null})는 STT 진입 전에 불린다 — 확실히 무관한
+	 * 영상에 수십 분짜리 전사를 태우지 않는 것이 이 게이트의 절반이다.
+	 */
+	private void gate(UUID summaryId, YtDlp.Meta meta, String transcriptHead) {
+		VideoRelevanceResponse verdict = summarizer.judgeRelevance(meta, transcriptHead);
+		if (!verdict.relevant()) {
+			String reason = verdict.reason() == null || verdict.reason().isBlank() ? ""
+					: " (" + verdict.reason().strip() + ")";
+			throw new RejectedException("면접·취업 준비와 관련된 영상만 요약합니다." + reason);
+		}
+	}
+
+	/** 내용 판정 재료 — 자막 앞부분. 전체를 보낼 이유가 없다 (주제는 앞부분에서 드러난다). */
+	private static String transcriptHead(java.util.List<TranscriptSegment> segments) {
+		StringBuilder head = new StringBuilder();
+		for (TranscriptSegment segment : segments) {
+			if (head.length() >= 2_000) {
+				break;
+			}
+			if (!head.isEmpty()) {
+				head.append(' ');
+			}
+			head.append(segment.text());
+		}
+		return head.toString();
+	}
+
+	/** 주제 게이트 거부. 메시지가 곧 사용자 문구다. */
+	static class RejectedException extends RuntimeException {
+
+		RejectedException(String message) {
+			super(message);
 		}
 	}
 

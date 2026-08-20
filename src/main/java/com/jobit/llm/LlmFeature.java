@@ -35,6 +35,9 @@ public enum LlmFeature {
 
 	REWRITE,
 
+	/** 영상 주제 판정 (게이트) — 면접·취업 무관 영상을 요약 전에 거른다. 영상당 1~2회. */
+	VIDEO_RELEVANCE,
+
 	/** 영상 요약 1단계 — 자막 청크 하나를 문단 요약으로 접는다. 청크 수만큼 반복된다. */
 	VIDEO_CHUNK,
 

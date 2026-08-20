@@ -43,6 +43,6 @@ class YtDlpTest {
 	}
 
 	private static YtDlp.Probe probe(List<String> manual, List<String> auto) {
-		return new YtDlp.Probe(new YtDlp.Meta("t", "c", 100), manual, auto);
+		return new YtDlp.Probe(new YtDlp.Meta("t", "c", 100, null), manual, auto);
 	}
 }

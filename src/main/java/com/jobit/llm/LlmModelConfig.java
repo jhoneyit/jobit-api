@@ -52,6 +52,8 @@ public final class LlmModelConfig {
 			// **호출 수가 많은 유일한 기능이라** (세션 1건 = 문항 수만큼) thinking 을 켜면
 			// 세션 전체 시간이 문항 수만큼 곱해져 늘어난다. 여기만은 켜지 않는다.
 			LlmFeature.ANSWER_SCORING, new FeatureConfig(DEFAULT_MODEL, Effort.MEDIUM, 2_000L),
+			// 영상 주제 판정 — 갭 판정과 같은 결의 이진 판정이다. 출력이 한 문장이라 작다.
+			LlmFeature.VIDEO_RELEVANCE, new FeatureConfig(DEFAULT_MODEL, Effort.MEDIUM, 500L),
 			// 영상 자막 청크 요약 — 구조화 추출과 같은 결이고, 청크 수만큼 반복이라 채점과
 			// 같은 이유로 thinking 을 켜면 안 된다.
 			LlmFeature.VIDEO_CHUNK, new FeatureConfig(DEFAULT_MODEL, Effort.LOW, 800L),

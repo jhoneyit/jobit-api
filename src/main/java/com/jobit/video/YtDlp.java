@@ -47,8 +47,11 @@ public class YtDlp {
 		this.binary = binary;
 	}
 
-	/** @param durationSec 라이브 예약 등 길이가 없는 영상은 0 */
-	public record Meta(String title, String channel, int durationSec) {
+	/**
+	 * @param durationSec 라이브 예약 등 길이가 없는 영상은 0
+	 * @param description 주제 판정 재료다 — 저장하지는 않는다
+	 */
+	public record Meta(String title, String channel, int durationSec, String description) {
 	}
 
 	/** 메타 + 존재하는 자막 트랙 목록. 트랙 선택({@link #chooseTrack})의 입력이다. */
@@ -63,7 +66,7 @@ public class YtDlp {
 		JsonNode json = MAPPER.readTree(Files.readString(out));
 		return new Probe(
 				new Meta(json.path("title").asString(null), json.path("channel").asString(null),
-						json.path("duration").asInt(0)),
+						json.path("duration").asInt(0), json.path("description").asString(null)),
 				keys(json.path("subtitles")), keys(json.path("automatic_captions")));
 	}
 

@@ -509,7 +509,12 @@ POST 다. 프론트는 404 를 "아직 분석 안 함"으로 읽고 분석 버�
 
 **처음으로 동기 응답이 불가능한 기능이다.** 자막 영상도 수 분, STT 는 수십 분 —
 POST 는 접수만 하고 바로 돌아오며, 프론트는 GET 으로 **폴링**한다.
-상태 기계: `PENDING → RUNNING → DONE | FAILED`.
+상태 기계: `PENDING → RUNNING → DONE | FAILED | REJECTED`.
+
+**주제 게이트가 있다.** 면접·취업·커리어·개발 기술 학습과 무관한 영상(음악·게임·브이로그 등)은
+LLM 판정으로 걸러 `REJECTED` 가 된다 — `errorMessage` 에 판정 근거가 실린다. 자막 없는 영상은
+메타데이터 판정을 **STT 전에** 한 번 더 거친다 (무관 영상에 수십 분 전사를 태우지 않는다).
+REJECTED 영상을 다시 넣으면 재판정한다 (판정이 틀렸을 때의 항의 수단이고, 한도를 소비한다).
 
 ### `POST /api/video-summaries` — 요약 요청 (접수만) ✅
 
@@ -535,9 +540,9 @@ UUID 를 아는 사람은 읽는다. 서명(`X-Owner-Auth`)은 여전히 필수�
   "videoId": "dQw4w9WgXcQ",
   "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
   "title": "영상 제목", "channel": "채널명", "durationSec": 212,
-  "status": "DONE",              // PENDING | RUNNING | DONE | FAILED
+  "status": "DONE",              // PENDING | RUNNING | DONE | FAILED | REJECTED
   "source": "CAPTION",           // CAPTION | STT. 완료 전엔 null
-  "errorMessage": null,          // FAILED 일 때만. 그대로 화면에 띄워도 되는 문구
+  "errorMessage": null,          // FAILED·REJECTED 일 때만. 그대로 화면에 띄워도 되는 문구
   "report": {                    // DONE 일 때만
     "oneLine": "…",
     "overview": "…",

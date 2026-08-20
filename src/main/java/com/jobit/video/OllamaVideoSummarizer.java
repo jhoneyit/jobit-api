@@ -44,6 +44,19 @@ public class OllamaVideoSummarizer implements VideoSummarizer {
 	private final LlmCallRecorder callRecorder;
 
 	@Override
+	public VideoRelevanceResponse judgeRelevance(YtDlp.Meta meta, String transcriptHead) {
+		if (transcriptHead == null) {
+			return call(LlmFeature.VIDEO_RELEVANCE, VideoRelevancePrompts.META_SYSTEM,
+					VideoRelevancePrompts.metaMessage(meta.title(), meta.channel(),
+							meta.description()),
+					VideoRelevanceResponse.class);
+		}
+		return call(LlmFeature.VIDEO_RELEVANCE, VideoRelevancePrompts.CONTENT_SYSTEM,
+				VideoRelevancePrompts.contentMessage(meta.title(), transcriptHead),
+				VideoRelevanceResponse.class);
+	}
+
+	@Override
 	public VideoReportResponse summarize(Request request) {
 		List<TranscriptChunker.Chunk> chunks = TranscriptChunker.chunk(request.segments());
 		if (chunks.isEmpty()) {

@@ -22,7 +22,7 @@ import org.hibernate.type.SqlTypes;
 public class VideoSummary {
 
 	public enum Status {
-		PENDING, RUNNING, DONE, FAILED
+		PENDING, RUNNING, DONE, FAILED, REJECTED
 	}
 
 	public enum Source {
@@ -107,7 +107,14 @@ public class VideoSummary {
 		this.updatedAt = now;
 	}
 
-	/** 재시도 진입 — FAILED 만 되돌린다. DONE 을 되돌리는 경로는 없다 (캐시가 목적이다). */
+	/** 주제 게이트 거부 — 실패가 아니라 "대상 아님"이다. 문구·다음 행동이 달라 상태를 가른다. */
+	public void reject(String userMessage, OffsetDateTime now) {
+		this.status = Status.REJECTED;
+		this.errorMessage = userMessage;
+		this.updatedAt = now;
+	}
+
+	/** 재시도 진입 — FAILED·REJECTED 만 되돌린다. DONE 을 되돌리는 경로는 없다 (캐시가 목적이다). */
 	public void requeue(OffsetDateTime now) {
 		this.status = Status.PENDING;
 		this.errorMessage = null;

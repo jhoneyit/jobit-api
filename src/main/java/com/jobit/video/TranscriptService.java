@@ -33,8 +33,14 @@ public class TranscriptService {
 	public record Result(YtDlp.Meta meta, List<TranscriptSegment> segments, Source source) {
 	}
 
-	/** 임시 작업 디렉터리는 성공·실패와 무관하게 지운다 — 오디오 WAV 가 수십 MB 다. */
-	public Result acquire(String videoId) throws IOException, InterruptedException {
+	/**
+	 * 임시 작업 디렉터리는 성공·실패와 무관하게 지운다 — 오디오 WAV 가 수십 MB 다.
+	 *
+	 * @param beforeStt STT 로 넘어가기 직전 훅 — 주제 게이트가 여기 걸린다. 자막이 있으면
+	 *                  불리지 않는다 (자막 확보는 수 초라 게이트를 내용 판정 한 번으로 미룬다)
+	 */
+	public Result acquire(String videoId, java.util.function.Consumer<YtDlp.Meta> beforeStt)
+			throws IOException, InterruptedException {
 		Path workDir = Files.createTempDirectory("jobit-video-" + videoId + "-");
 		try {
 			YtDlp.Probe probe = ytDlp.probe(videoId, workDir);
@@ -50,6 +56,8 @@ public class TranscriptService {
 			if (!whisperCli.enabled()) {
 				throw new WhisperCli.SttNotConfiguredException();
 			}
+			// 수십 분짜리 전사에 들어가기 전, 호출자가 걸어 둔 관문(주제 게이트)을 통과해야 한다.
+			beforeStt.accept(meta);
 			log.info("자막 없음 — STT 로 전환: video={}", videoId);
 			Path wav = ytDlp.downloadAudio(videoId, workDir);
 			List<TranscriptSegment> transcribed = whisperCli.transcribe(wav, workDir);

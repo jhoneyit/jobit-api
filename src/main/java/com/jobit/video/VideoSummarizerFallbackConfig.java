@@ -17,8 +17,17 @@ public class VideoSummarizerFallbackConfig {
 	@ConditionalOnMissingBean(VideoSummarizer.class)
 	public VideoSummarizer unavailableVideoSummarizer() {
 		log.warn("VideoSummarizer 구현이 없습니다. 영상 요약을 호출하면 실패합니다 (완료된 보고서 조회는 정상 동작합니다).");
-		return request -> {
-			throw new VideoSummarizerNotConfiguredException();
+		return new VideoSummarizer() {
+
+			@Override
+			public VideoReportResponse summarize(Request request) {
+				throw new VideoSummarizerNotConfiguredException();
+			}
+
+			@Override
+			public VideoRelevanceResponse judgeRelevance(YtDlp.Meta meta, String transcriptHead) {
+				throw new VideoSummarizerNotConfiguredException();
+			}
 		};
 	}
 
