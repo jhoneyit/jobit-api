@@ -101,7 +101,9 @@ public class OllamaVideoSummarizer implements VideoSummarizer {
 		for (int attempt = 1; attempt <= MAX_REPORT_ATTEMPTS; attempt++) {
 			VideoReportResponse report = call(LlmFeature.VIDEO_REPORT, VideoPrompts.REPORT_SYSTEM,
 					VideoPrompts.reportMessage(request.title(), request.channel(),
-							request.durationSec(), starts, summaries),
+							request.durationSec(), starts, summaries,
+							TranscriptTimeline.sample(request.segments(),
+									request.durationSec())),
 					VideoReportResponse.class);
 
 			String problem = VideoReportNormalizer.problem(report);
