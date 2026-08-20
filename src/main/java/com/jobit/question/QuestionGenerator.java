@@ -44,16 +44,19 @@ public class QuestionGenerator {
 	/**
 	 * 질문을 생성하며 완성되는 대로 {@code onQuestion}에 넘긴다.
 	 *
+	 * @param referenceQuestions 질문 은행에서 추린 참고 질문 (스펙 §5). 비어 있으면 참고 절 없이
+	 *                           생성한다 — 은행이 비어 있어도 아무것도 나빠지지 않는다
 	 * @param onQuestion 검증을 통과한 질문마다 호출된다. 여기서 던지면 스트림이 중단된다
 	 * @return 실제로 사용된 모델과 사용량. 호출자가 {@code llm_call_log}에 기록한다
 	 */
 	public Result generate(Map<String, Object> parsedMeta, List<Requirement> requirements,
-			Consumer<QuestionGenResponse.RawQuestion> onQuestion) {
+			List<String> referenceQuestions, Consumer<QuestionGenResponse.RawQuestion> onQuestion) {
 
 		LlmModelConfig.FeatureConfig config = LlmModelConfig.of(LlmFeature.QUESTION_GEN);
 
 		OllamaChatClient.Request request = new OllamaChatClient.Request(config.model(),
-				QuestionGenPrompts.SYSTEM, QuestionGenPrompts.userMessage(parsedMeta, requirements),
+				QuestionGenPrompts.SYSTEM,
+				QuestionGenPrompts.userMessage(parsedMeta, requirements, referenceQuestions),
 				JsonSchemas.of(QuestionGenResponse.class), config.effort(), config.maxTokens());
 
 		IncrementalArrayParser parser = new IncrementalArrayParser("questions");

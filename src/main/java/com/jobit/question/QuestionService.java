@@ -56,6 +56,8 @@ public class QuestionService {
 	/** API 키가 없으면 이 빈이 없다. 그 경우 호출 시점에 명확한 예외를 던진다. */
 	private final Optional<QuestionGenerator> generator;
 
+	private final QuestionReferences questionReferences;
+
 	/**
 	 * 질문을 생성하거나 캐시를 재사용한다.
 	 *
@@ -88,10 +90,12 @@ public class QuestionService {
 
 		List<QuestionSetWriter.PendingQuestion> pending = new ArrayList<>();
 		Map<String, Object> parsedMeta = readParsed(posting);
+		// 질문 은행 참고 (스펙 §5) — SQL 검색뿐이라 한도를 소비하지 않는다.
+		List<String> references = questionReferences.collect(requirements);
 
 		QuestionGenerator.Result result;
 		try {
-			result = gen.generate(parsedMeta, requirements, raw -> {
+			result = gen.generate(parsedMeta, requirements, references, raw -> {
 				QuestionSetWriter.PendingQuestion p = toPending(raw, requirements, pending.size());
 				pending.add(p);
 				onQuestion.accept(toView(p));
