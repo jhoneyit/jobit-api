@@ -35,6 +35,12 @@ public enum LlmFeature {
 
 	REWRITE,
 
+	/** 영상 요약 1단계 — 자막 청크 하나를 문단 요약으로 접는다. 청크 수만큼 반복된다. */
+	VIDEO_CHUNK,
+
+	/** 영상 요약 2단계 — 청크 요약들을 하나의 보고서로 통합한다. 영상당 한 번이다. */
+	VIDEO_REPORT,
+
 	/**
 	 * 면접 연습 답변 채점 (docs/interview-practice-design.md).
 	 *

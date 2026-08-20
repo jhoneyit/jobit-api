@@ -51,7 +51,12 @@ public final class LlmModelConfig {
 			// 면접 답변 채점 — 답변 하나가 뼈대를 짚었는지 보는 판정이다. 성격이 갭 분석과 같다.
 			// **호출 수가 많은 유일한 기능이라** (세션 1건 = 문항 수만큼) thinking 을 켜면
 			// 세션 전체 시간이 문항 수만큼 곱해져 늘어난다. 여기만은 켜지 않는다.
-			LlmFeature.ANSWER_SCORING, new FeatureConfig(DEFAULT_MODEL, Effort.MEDIUM, 2_000L));
+			LlmFeature.ANSWER_SCORING, new FeatureConfig(DEFAULT_MODEL, Effort.MEDIUM, 2_000L),
+			// 영상 자막 청크 요약 — 구조화 추출과 같은 결이고, 청크 수만큼 반복이라 채점과
+			// 같은 이유로 thinking 을 켜면 안 된다.
+			LlmFeature.VIDEO_CHUNK, new FeatureConfig(DEFAULT_MODEL, Effort.LOW, 800L),
+			// 보고서 통합 — 결과 문장이 곧 제품 가치인 세 번째 기능. 영상당 한 번이라 켠다.
+			LlmFeature.VIDEO_REPORT, new FeatureConfig(DEFAULT_MODEL, Effort.HIGH, 3_000L));
 
 	private LlmModelConfig() {
 	}

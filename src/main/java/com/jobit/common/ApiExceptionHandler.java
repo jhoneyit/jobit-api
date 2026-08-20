@@ -10,6 +10,7 @@ import com.jobit.jd.JdParserFallbackConfig.JdParserNotConfiguredException;
 import com.jobit.llm.EmbeddingClientFallbackConfig.EmbeddingNotConfiguredException;
 import com.jobit.llm.LlmException;
 import com.jobit.resume.ResumeParserFallbackConfig.ResumeParserNotConfiguredException;
+import com.jobit.video.VideoSummaryService;
 import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
 import com.jobit.llm.LlmGuard;
@@ -246,6 +247,13 @@ public class ApiExceptionHandler {
 	public ResponseEntity<Map<String, String>> budgetExceeded(
 			LlmGuard.DailyBudgetExceededException ex) {
 		return body(HttpStatus.TOO_MANY_REQUESTS, ex.getMessage());
+	}
+
+	/** 유튜브 주소가 아닌 입력. 사용자가 고칠 수 있으므로 문구가 구체적이다. */
+	@ExceptionHandler(VideoSummaryService.InvalidVideoUrlException.class)
+	public ResponseEntity<Map<String, String>> invalidVideoUrl(
+			VideoSummaryService.InvalidVideoUrlException ex) {
+		return body(HttpStatus.BAD_REQUEST, "유튜브 영상 주소가 아닙니다. 영상 링크를 그대로 붙여넣어 주세요.");
 	}
 
 	@ExceptionHandler(LlmException.class)
