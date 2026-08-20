@@ -12,7 +12,7 @@ import java.util.List;
 public final class VideoPrompts {
 
 	/** 보고서 형식이 바뀌면 올린다. video_summary.prompt_version 으로 저장되어 재요약 판단에 쓴다. */
-	public static final String PROMPT_VERSION = "2026-08-20.2";
+	public static final String PROMPT_VERSION = "2026-08-20.3";
 
 	private static final String OPEN = "<transcript>";
 
@@ -40,6 +40,8 @@ public final class VideoPrompts {
 			- **자막에 없는 내용을 지어내거나 부풀리지 않는다.**
 			- 자막은 음성 인식 결과라 오탈자가 있다. 문맥상 명백하면 바로잡아 읽되, 불확실하면 그대로 둔다.
 			- 요약은 한국어로 쓴다. 기술 용어는 원어 그대로 둔다.
+			- **외국어 자막이면 대상·수치 같은 사실을 원문과 대조해 정확히 옮긴다.** 번역이
+			  확실하지 않은 명사는 원어를 괄호로 병기한다 — 대상을 바꿔 옮기면 요약 전체가 거짓이 된다.
 			""".formatted(GUARD);
 
 	public static final String REPORT_SYSTEM = """
