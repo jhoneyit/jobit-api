@@ -38,7 +38,11 @@ public final class LlmModelConfig {
 
 	private static final Map<LlmFeature, FeatureConfig> CONFIGS = Map.of(
 			// 구조화 추출이라 깊은 추론이 필요 없다. thinking 을 끄고 빠르게 받는다.
-			LlmFeature.JD_PARSE, new FeatureConfig(DEFAULT_MODEL, Effort.LOW, 4_000L),
+			// **출력 상한을 실측으로 낮췄다** (2026-08-20): 정상 출력이 9개 요구사항에 550~660
+			// 토큰이라, 상한 30개(@MaxItems) 꽉 채운 공고도 ~2,000 이면 넉넉하다. 4,000 이던
+			// 시절 폭주가 상한까지 가면 5분을 태웠다 — 폭주 자체는 @MaxItems 가 막지만,
+			// 이 값은 그 방어가 뚫렸을 때 낭비를 절반으로 줄이는 보험이다.
+			LlmFeature.JD_PARSE, new FeatureConfig(DEFAULT_MODEL, Effort.LOW, 2_500L),
 			// 제품의 첫인상을 결정하는 지점. 여기는 thinking 을 켠다.
 			LlmFeature.QUESTION_GEN, new FeatureConfig(DEFAULT_MODEL, Effort.HIGH, 8_000L),
 			// 이력서 → 문장 분해. JD 파싱과 성격이 같은 구조화 추출이다.

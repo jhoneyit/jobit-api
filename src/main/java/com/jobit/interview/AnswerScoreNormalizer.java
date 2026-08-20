@@ -21,7 +21,48 @@ final class AnswerScoreNormalizer {
 	private AnswerScoreNormalizer() {
 	}
 
+	/** 공백을 접은 비교용 형태 — 모델이 인용을 옮기며 줄바꿈·띄어쓰기를 다듬는 것까지 버리면 과하다. */
+	private static String collapse(String text) {
+		return text == null ? "" : text.replaceAll("\\s+", "");
+	}
+
+	/** 인용 최소 길이(공백 제거 후). 너무 짧은 인용은 우연히 일치해 검증이 무의미해진다. */
+	private static final int MIN_QUOTE_CHARS = 6;
+
 	/**
+	 * 인용 검증 경로 — 모델 응답을 답변 원문과 대조한다 (주입 방어 2층, 2026-08-20).
+	 *
+	 * <p>인덱스마다 답변에서 그대로 옮긴 인용(quote)이 와야 하고, <b>답변에 없는 인용이 달린
+	 * 항목은 버린다</b>. 프롬프트 가드(1층)는 모델 순응에 기대지만 이 대조는 그렇지 않다 —
+	 * 주입 답변에는 기술 내용이 없어 인용을 만들 수 없고, covered 가 전부 떨어지면 아래
+	 * 점수 상한이 0 이 된다.
+	 *
+	 * @param transcript 지원자 답변 원문. 인용 대조의 기준이다
+	 */
+	static AnswerScorer.Score normalize(int rawScore,
+			List<AnswerScoreResponse.Covered> rawCovered, int outlineSize, String feedback,
+			String transcript) {
+
+		String haystack = collapse(transcript);
+		List<Integer> verified = new java.util.ArrayList<>();
+		if (rawCovered != null) {
+			for (AnswerScoreResponse.Covered item : rawCovered) {
+				if (item == null) {
+					continue;
+				}
+				String needle = collapse(item.quote());
+				if (needle.length() >= MIN_QUOTE_CHARS && haystack.contains(needle)) {
+					verified.add(item.index());
+				}
+			}
+		}
+		return normalize(rawScore, verified, outlineSize, feedback);
+	}
+
+	/**
+	 * 재정규화 경로 — 이미 검증된 인덱스 목록을 받아 성질(범위·중복·상한)만 다시 지킨다.
+	 * 저장 직전의 이중 방어({@code InterviewService})가 이 갈래를 쓴다. 멱등이다.
+	 *
 	 * @param rawCovered 모델이 준 인덱스. null·범위 밖·중복이 섞여 들어온다고 가정한다
 	 * @param outlineSize 답변 뼈대 항목 수. 인덱스의 유효 범위는 {@code [0, outlineSize)}
 	 * @throws IllegalArgumentException {@code outlineSize}가 0 이하면. 뼈대 없는 질문은
@@ -40,7 +81,6 @@ final class AnswerScoreNormalizer {
 		if (rawCovered != null) {
 			for (Integer index : rawCovered) {
 				// **범위 밖 인덱스는 버린다.** 모델은 뼈대가 5개인데 7을 지어내기도 한다.
-				// 예외로 올리지 않는 이유: 나머지 인덱스는 멀쩡한데 재시도하면 돈만 더 쓴다.
 				if (index != null && index >= 0 && index < outlineSize) {
 					covered.add(index);
 				}
@@ -54,7 +94,10 @@ final class AnswerScoreNormalizer {
 			}
 		}
 
-		return new AnswerScorer.Score(clampScore(rawScore), List.copyOf(covered),
+		// **점수는 검증된 covered 비율을 넘지 못한다.** "짚은 항목 비율에서 시작한다"는 채점
+		// 규칙의 서버측 강제다 — 근거 없이 점수만 높은 응답(주입의 전형)이 여기서 잘린다.
+		int cap = 100 * covered.size() / outlineSize;
+		return new AnswerScorer.Score(Math.min(clampScore(rawScore), cap), List.copyOf(covered),
 				List.copyOf(missed), normalizeFeedback(feedback));
 	}
 

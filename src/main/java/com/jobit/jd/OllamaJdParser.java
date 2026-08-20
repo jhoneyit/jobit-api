@@ -140,6 +140,13 @@ public class OllamaJdParser implements JdParser {
 		if (response == null || response.parsed() == null) {
 			throw new InvalidResponseException("parsed 가 비어 있습니다");
 		}
+		// **전역 키워드가 비면 재시도한다.** company·stack 은 공고에 정말 없을 수 있지만
+		// (프롬프트 규약: 없으면 null), "공고 전반을 대표하는 키워드"는 본문이 있는 한 항상
+		// 뽑을 수 있다 — 비어서 오는 것은 모델이 그 필드를 건너뛴 것이고, 캐시에 굳으면
+		// 그 공고는 영영 빈 메타로 남는다 (2026-08-15 프로브에서 실제로 관측된 응답 형태다).
+		if (response.parsed().keywords() == null || response.parsed().keywords().isEmpty()) {
+			throw new InvalidResponseException("전역 keywords 가 비어 있습니다");
+		}
 		List<JdParseResponse.RawRequirement> requirements = response.requirements();
 		if (requirements == null || requirements.isEmpty()) {
 			throw new InvalidResponseException("요구사항이 하나도 없습니다");

@@ -148,7 +148,8 @@ class InterviewServiceTest {
 		InterviewService.ScoredAnswer scored = service.submitAnswer(started.session().getId(),
 				OWNER, questions.getFirst().getId(), "답변", 10_000);
 
-		assertThat(scored.score().score()).as("DB CHECK 제약에 닿기 전에 잘려야 한다").isEqualTo(100);
+		// 검증된 covered 가 1/2 이라 점수 상한도 50 이다 — 근거 없는 고득점이 저장되지 않는다.
+		assertThat(scored.score().score()).as("DB CHECK 제약에 닿기 전에 잘려야 한다").isEqualTo(50);
 		assertThat(scored.score().covered()).containsExactly(0);
 		assertThat(scored.score().missed()).containsExactly(1);
 	}
@@ -193,7 +194,7 @@ class InterviewServiceTest {
 	@Test
 	@DisplayName("답변을 제출하면 채점 결과가 붙고 답변 수가 오른다")
 	void submitsAndScores() {
-		givenScore(80, List.of(0));
+		givenScore(80, List.of(0, 1));
 		InterviewService.StartedSession started = service.start(OWNER, posting.getId());
 		UUID sessionId = started.session().getId();
 
@@ -202,7 +203,7 @@ class InterviewServiceTest {
 
 		assertThat(scored.score().score()).isEqualTo(80);
 		// missed 는 서버가 covered 의 여집합으로 계산한다 — 목이 준 빈 목록이 아니다.
-		assertThat(scored.score().missed()).containsExactly(1);
+		assertThat(scored.score().missed()).isEmpty();
 		assertThat(scored.outline()).containsExactly("포인트 A", "포인트 B");
 		assertThat(sessionRepository.findById(sessionId).orElseThrow().getAnsweredCount())
 			.isEqualTo((short) 1);

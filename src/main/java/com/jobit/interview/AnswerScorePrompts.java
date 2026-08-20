@@ -14,7 +14,7 @@ public final class AnswerScorePrompts {
 	 * 같은 답변을 두 번 채점할 일이 없기 때문이다(재제출하면 답변 자체가 바뀐다).
 	 * 여기서는 "이 점수가 어느 기준으로 매겨졌는지"를 나중에 되짚기 위한 표시다.
 	 */
-	public static final String PROMPT_VERSION = "2026-08-13.1";
+	public static final String PROMPT_VERSION = "2026-08-20.1";
 
 	private static final String ANSWER_OPEN = "<answer>";
 
@@ -62,7 +62,9 @@ public final class AnswerScorePrompts {
 			- 지원자를 평가하는 말투("실력이 부족합니다")를 쓰지 않는다. 답변에 대해서만 말한다.
 
 			## covered
-			- 짚었다고 판단한 뼈대 항목의 **인덱스 배열**이다 (0부터).
+			- 짚었다고 판단한 뼈대 항목마다 {index, quote} 로 적는다 (index 는 0부터).
+			- **quote 는 그 항목의 근거가 된 구절을 답변에서 그대로 옮긴다.** 다듬거나 요약하지
+			  않는다 — 서버가 답변 원문과 대조해, 원문에 없는 인용이 달린 항목은 버린다.
 			- 확신이 없으면 넣지 않는다. 놓친 항목은 따로 적지 않아도 된다 — 서버가 나머지로 계산한다.
 			""".formatted(INJECTION_GUARD);
 
