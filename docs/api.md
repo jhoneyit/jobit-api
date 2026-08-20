@@ -8,7 +8,8 @@
 `GET /api/interviews` · `GET·DELETE /api/interviews/{id}` · `POST /api/interviews/claim`) /
 이력서 5종 ✅ (`POST /api/resumes` · `GET /api/resumes` · `GET·DELETE /api/resumes/{id}` ·
 `POST /api/resumes/claim`) / 갭 분석 2종 ✅ (`POST·GET /api/gap-analyses`) /
-리라이트 2종 ✅ (`POST /api/gap-items/{id}/rewrite` · `PATCH /api/rewrite-suggestions/{id}`)
+리라이트 2종 ✅ (`POST /api/gap-items/{id}/rewrite` · `PATCH /api/rewrite-suggestions/{id}`) /
+영상 요약 6종 ✅ (`POST·GET·DELETE /api/video-summaries` · `…/qna` · `…/frame/{t}`)
 
 ## 공통 규약
 
@@ -497,6 +498,97 @@ POST 다. 프론트는 404 를 "아직 분석 안 함"으로 읽고 분석 버�
 붙인다.
 
 **에러**: `400` 본문/헤더 오류 · `404` 제안이 없거나 남의 것.
+
+---
+
+## 영상 요약 (스펙 외 새 축) ✅
+
+유튜브 URL 을 받아 자막(없으면 Whisper STT)을 추출하고, 로컬 LLM 이 보고서(한 줄 요약 ·
+개요 · 타임스탬프 섹션 · 핵심 정리)로 정리한다. `video_id` 기준 **전역 캐시**다 — 같은 영상을
+두 사람이 넣으면 한 번만 처리한다 (공고와 같은 구조).
+
+**처음으로 동기 응답이 불가능한 기능이다.** 자막 영상도 수 분, STT 는 수십 분 —
+POST 는 접수만 하고 바로 돌아오며, 프론트는 GET 으로 **폴링**한다.
+상태 기계: `PENDING → RUNNING → DONE | FAILED | REJECTED`.
+
+**주제 게이트가 있다.** 면접·취업·커리어·개발 기술 학습과 무관한 영상(음악·게임·브이로그 등)은
+LLM 판정으로 걸러 `REJECTED` 가 된다 — `errorMessage` 에 판정 근거가 실린다. 자막 없는 영상은
+메타데이터 판정을 **STT 전에** 한 번 더 거친다 (무관 영상에 수십 분 전사를 태우지 않는다).
+REJECTED 영상을 다시 넣으면 재판정한다 (판정이 틀렸을 때의 항의 수단이고, 한도를 소비한다).
+
+### `POST /api/video-summaries` — 요약 요청 (접수만) ✅
+
+```jsonc
+// 헤더: X-Owner-Key (필수)
+{ "url": "https://www.youtube.com/watch?v=..." }   // youtu.be·shorts·embed·live 형태도 받는다
+```
+
+**응답 `200`** — 아래 GET 과 같은 형태. 이미 요약된 영상이면 `status: "DONE"` 과 보고서가
+바로 온다. FAILED 상태의 영상을 다시 넣으면 **재시도로 되살린다** (이때만 한도를 소비한다 —
+DONE·진행 중 재요청은 소비하지 않는다).
+
+**에러**: `400` 유튜브 주소 아님 · 헤더 누락 / `429` 한도.
+
+### `GET /api/video-summaries/{summaryId}` — 상태 폴링 + 보고서 ✅
+
+**`X-Owner-Key` 가 없다** — 보고서는 공유 링크가 목적인 전역 캐시 자산이라(공고와 같다)
+UUID 를 아는 사람은 읽는다. 서명(`X-Owner-Auth`)은 여전히 필수다.
+
+```jsonc
+{
+  "summaryId": "uuid",
+  "videoId": "dQw4w9WgXcQ",
+  "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+  "title": "영상 제목", "channel": "채널명", "durationSec": 212,
+  "status": "DONE",              // PENDING | RUNNING | DONE | FAILED | REJECTED
+  "source": "CAPTION",           // CAPTION | STT. 완료 전엔 null
+  "errorMessage": null,          // FAILED·REJECTED 일 때만. 그대로 화면에 띄워도 되는 문구
+  "report": {                    // DONE 일 때만
+    "oneLine": "…",
+    "overview": "…",
+    "sections": [ { "heading": "…", "startSec": 130, "summary": "…" } ],
+    "takeaways": ["…"]
+  },
+  "capturedFrames": [0, 130],    // 캡처가 존재하는 섹션 시각 — 이미지 영역을 그릴지 판단
+  "createdAt": "2026-08-20T00:00:00Z"
+}
+```
+
+**`sections[].startSec` 은 null 일 수 있다** — 모델이 확신하지 못한 좌표는 지어내는 대신
+비운다. 있으면 `https://youtu.be/<videoId>?t=<startSec>` 딥링크로 쓴다.
+
+**폴링 간격은 5초면 충분하다.** 자막 영상은 수 분, STT 는 수십 분 걸린다 — 화면이 그 사실을
+말해야 한다 (source 가 아직 null 이면 어느 쪽인지 모르는 단계다).
+
+### `POST /api/video-summaries/{summaryId}/qna` — 영상 내용 질문 ✅
+
+3분할 화면의 우측 채팅. **검색된 자막 발췌만이 근거다** — 영상에 없는 내용은 "찾지 못했다"고
+답한다 (일반 지식으로 메꾸지 않는다). 질문 하나 = GPU 추론 하나라 소유자 한도를 소비한다.
+
+```jsonc
+// 헤더: X-Owner-Key (필수)
+{ "question": "이 사람은 어떤 회사에 합격했어?", "history": ["질문: …", "답변: …"] }  // history 선택, 최근 6개만 반영
+```
+
+**응답 `200`**: `{ "answer": "…", "refs": [332] }` — `refs` 는 근거 구간의 시각(초)으로,
+서버가 발췌 목록과 대조해 재검증한 값만 온다 (플레이어 시킹 버튼이 된다).
+
+**에러**: `409` 요약 미완/질문 기능 없음(V16 이전 요약 — 재요약하면 생긴다) · `429` 한도 ·
+`502` LLM 장애.
+
+### `GET /api/video-summaries/{summaryId}/frame/{startSec}` — 섹션 캡처 이미지 ✅
+
+`image/jpeg`, 7일 캐시 헤더. 캡처가 없으면 `404` — 화면은 `capturedFrames` 로 미리 알 수 있다.
+소유자 없이 읽는다 (보고서와 같은 공유 자산).
+
+### `GET /api/video-summaries` — 내 요약 목록 ✅
+
+`X-Owner-Key` 필수. `{ "items": [ { summaryId, videoId, title, channel, durationSec, status, submittedAt } ] }` 최근순.
+
+### `DELETE /api/video-summaries/{summaryId}` — 내 이력에서 삭제 ✅
+
+`X-Owner-Key` 필수, `204`. **지우는 것은 내 이력 한 줄뿐**이고 요약은 전역 캐시라 남는다
+(제출 이력 삭제와 같은 규약). `404` 없거나 내 이력이 아님.
 
 ---
 
