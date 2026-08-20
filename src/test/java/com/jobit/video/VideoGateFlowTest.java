@@ -69,7 +69,8 @@ class VideoGateFlowTest {
 
 		service = new VideoSummaryService(summaryRepository,
 				mock(VideoSubmissionRepository.class), transcriptService, summarizer,
-				mock(LlmGuard.class), transactionTemplate,
+				mock(VideoChunkRepository.class), mock(com.jobit.llm.EmbeddingClient.class),
+				mock(VideoFrames.class), mock(LlmGuard.class), transactionTemplate,
 				Clock.fixed(Instant.parse("2026-08-20T10:00:00Z"), ZoneOffset.UTC));
 	}
 

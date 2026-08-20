@@ -48,6 +48,12 @@ public class VideoSummaryService {
 
 	private final VideoSummarizer summarizer;
 
+	private final VideoChunkRepository chunkRepository;
+
+	private final com.jobit.llm.EmbeddingClient embeddingClient;
+
+	private final VideoFrames frames;
+
 	private final LlmGuard llmGuard;
 
 	private final TransactionTemplate transactionTemplate;
@@ -60,12 +66,16 @@ public class VideoSummaryService {
 
 	public VideoSummaryService(VideoSummaryRepository summaryRepository,
 			VideoSubmissionRepository submissionRepository, TranscriptService transcriptService,
-			VideoSummarizer summarizer, LlmGuard llmGuard, TransactionTemplate transactionTemplate,
-			Clock clock) {
+			VideoSummarizer summarizer, VideoChunkRepository chunkRepository,
+			com.jobit.llm.EmbeddingClient embeddingClient, VideoFrames frames, LlmGuard llmGuard,
+			TransactionTemplate transactionTemplate, Clock clock) {
 		this.summaryRepository = summaryRepository;
 		this.submissionRepository = submissionRepository;
 		this.transcriptService = transcriptService;
 		this.summarizer = summarizer;
+		this.chunkRepository = chunkRepository;
+		this.embeddingClient = embeddingClient;
+		this.frames = frames;
 		this.llmGuard = llmGuard;
 		this.transactionTemplate = transactionTemplate;
 		this.clock = clock;
@@ -204,6 +214,10 @@ public class VideoSummaryService {
 					? VideoSummary.Source.CAPTION : VideoSummary.Source.STT;
 			update(summaryId, s -> s.complete(source, json, VideoPrompts.PROMPT_VERSION,
 					OffsetDateTime.now(clock)));
+
+			// QnA 청크·프레임 — 둘 다 enrichment 라 실패해도 요약(본체)은 이미 DONE 이다.
+			ingestQnaChunks(summaryId, transcript.segments());
+			frames.captureForReport(summaryId, videoId, report);
 			log.info("영상 요약 완료: video={} source={}", videoId, source);
 		}
 		catch (RejectedException ex) {
@@ -228,6 +242,36 @@ public class VideoSummaryService {
 			String reason = verdict.reason() == null || verdict.reason().isBlank() ? ""
 					: " (" + verdict.reason().strip() + ")";
 			throw new RejectedException("면접·취업 준비와 관련된 영상만 요약합니다." + reason);
+		}
+	}
+
+	/**
+	 * QnA 검색용 세립 청크(~1,000자) + 임베딩 적재 (V16).
+	 *
+	 * <p>재요약이면 이전 적재를 비우고 다시 넣는다 — 중복은 검색을 오염시킨다.
+	 */
+	private void ingestQnaChunks(UUID summaryId, java.util.List<TranscriptSegment> segments) {
+		try {
+			var pieces = TranscriptChunker.split(segments, 1_000);
+			var texts = pieces.stream().map(TranscriptChunker.Chunk::text).toList();
+			var vectors = embeddingClient.embedAll(texts);
+			if (vectors.size() != pieces.size()) {
+				log.warn("QnA 청크 임베딩 개수 불일치 — 이 요약의 질문 기능을 비활성으로 둔다");
+				return;
+			}
+			var rows = new java.util.ArrayList<VideoChunkRepository.Chunk>(pieces.size());
+			for (int i = 0; i < pieces.size(); i++) {
+				rows.add(new VideoChunkRepository.Chunk(pieces.get(i).startSec(),
+						pieces.get(i).text(), vectors.get(i)));
+			}
+			transactionTemplate.executeWithoutResult(tx -> {
+				chunkRepository.deleteBySummaryId(summaryId);
+				chunkRepository.saveAll(summaryId, rows);
+			});
+			log.info("QnA 청크 {}개 적재: summary={}", rows.size(), summaryId);
+		}
+		catch (RuntimeException ex) {
+			log.warn("QnA 청크 적재 실패 — 요약은 유지하고 질문 기능만 비활성이다: {}", ex.toString());
 		}
 	}
 

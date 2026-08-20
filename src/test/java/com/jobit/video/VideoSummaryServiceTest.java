@@ -74,9 +74,10 @@ class VideoSummaryServiceTest {
 			.willReturn(Optional.empty());
 
 		service = new VideoSummaryService(summaryRepository, submissionRepository,
-				mock(TranscriptService.class), mock(VideoSummarizer.class), llmGuard,
-				transactionTemplate, Clock.fixed(Instant.parse("2026-08-20T10:00:00Z"),
-						ZoneOffset.UTC));
+				mock(TranscriptService.class), mock(VideoSummarizer.class),
+				mock(VideoChunkRepository.class), mock(com.jobit.llm.EmbeddingClient.class),
+				mock(VideoFrames.class), llmGuard, transactionTemplate,
+				Clock.fixed(Instant.parse("2026-08-20T10:00:00Z"), ZoneOffset.UTC));
 	}
 
 	@Test

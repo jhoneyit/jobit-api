@@ -249,6 +249,13 @@ public class ApiExceptionHandler {
 		return body(HttpStatus.TOO_MANY_REQUESTS, ex.getMessage());
 	}
 
+	/** QnA 를 지금 쓸 수 없는 상태 (요약 미완/청크 없음/미설정). 문구가 다음 행동을 말한다. */
+	@ExceptionHandler(com.jobit.video.VideoQnaService.QnaUnavailableException.class)
+	public ResponseEntity<Map<String, String>> qnaUnavailable(
+			com.jobit.video.VideoQnaService.QnaUnavailableException ex) {
+		return body(HttpStatus.CONFLICT, ex.getMessage());
+	}
+
 	/** 유튜브 주소가 아닌 입력. 사용자가 고칠 수 있으므로 문구가 구체적이다. */
 	@ExceptionHandler(VideoSummaryService.InvalidVideoUrlException.class)
 	public ResponseEntity<Map<String, String>> invalidVideoUrl(

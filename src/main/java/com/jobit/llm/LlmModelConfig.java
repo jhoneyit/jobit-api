@@ -58,7 +58,9 @@ public final class LlmModelConfig {
 			// 같은 이유로 thinking 을 켜면 안 된다.
 			LlmFeature.VIDEO_CHUNK, new FeatureConfig(DEFAULT_MODEL, Effort.LOW, 800L),
 			// 보고서 통합 — 결과 문장이 곧 제품 가치인 세 번째 기능. 영상당 한 번이라 켠다.
-			LlmFeature.VIDEO_REPORT, new FeatureConfig(DEFAULT_MODEL, Effort.HIGH, 3_000L));
+			LlmFeature.VIDEO_REPORT, new FeatureConfig(DEFAULT_MODEL, Effort.HIGH, 3_000L),
+			// 영상 QnA — 채팅 왕복이라 대기 시간이 곧 체감이다. 판정들과 같은 결로 끈다.
+			LlmFeature.VIDEO_QNA, new FeatureConfig(DEFAULT_MODEL, Effort.MEDIUM, 800L));
 
 	private LlmModelConfig() {
 	}

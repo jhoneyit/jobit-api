@@ -155,6 +155,33 @@ public class YtDlp {
 		return wav;
 	}
 
+	/**
+	 * 프레임 추출용 최저화질 영상 — 한 번 받아 여러 섹션의 프레임을 로컬에서 뽑는다.
+	 *
+	 * <p>처음에는 {@code --download-sections} 로 섹션 1초씩만 받았는데, 그 경로는 ffmpeg 가
+	 * 구글비디오 URL 을 직접 읽다 403 을 맞았다 (실측 2026-08-20). 일반 다운로드 경로는
+	 * yt-dlp 가 헤더를 챙겨 안정적이고, 144p 영상은 분당 ~1MB 라 통짜가 오히려 싸다.
+	 */
+	public Path downloadWorstVideo(String videoId, Path workDir)
+			throws IOException, InterruptedException {
+
+		run(List.of(binary, "--no-playlist", "-f", "worstvideo[ext=mp4]/worst[ext=mp4]/worst",
+				"-o", "frames-src.%(ext)s", url(videoId)), workDir, null, AUDIO_TIMEOUT);
+		try (Stream<Path> files = Files.list(workDir)) {
+			return files.filter(f -> f.getFileName().toString().startsWith("frames-src."))
+				.findFirst()
+				.orElseThrow(() -> new IOException("영상 파일이 만들어지지 않았습니다"));
+		}
+	}
+
+	/** 받은 영상에서 특정 시각의 프레임 1장. {@code -ss} 를 입력 앞에 둬 시킹이 빠르다. */
+	public void extractFrame(Path video, int startSec, Path outputJpg, Path workDir)
+			throws IOException, InterruptedException {
+		Subprocess.run(List.of("ffmpeg", "-y", "-loglevel", "error", "-ss",
+				String.valueOf(startSec), "-i", video.toString(), "-frames:v", "1", "-q:v", "4",
+				outputJpg.toString()), workDir, null, Duration.ofSeconds(30));
+	}
+
 	private void run(List<String> command, Path workDir, Path stdout, Duration timeout)
 			throws IOException, InterruptedException {
 		try {

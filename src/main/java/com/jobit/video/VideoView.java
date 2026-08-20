@@ -19,11 +19,15 @@ public final class VideoView {
 	}
 
 	public static Detail of(VideoSummary summary) {
+		return of(summary, java.util.List.of());
+	}
+
+	public static Detail of(VideoSummary summary, java.util.List<Integer> capturedFrames) {
 		return new Detail(summary.getId(), summary.getVideoId(), summary.getUrl(),
 				summary.getTitle(), summary.getChannel(), summary.getDurationSec(),
 				summary.getStatus(),
 				summary.getTranscriptSource(), summary.getErrorMessage(), report(summary),
-				summary.getCreatedAt());
+				capturedFrames, summary.getCreatedAt());
 	}
 
 	public static Row row(VideoSubmission submission) {
@@ -44,9 +48,13 @@ public final class VideoView {
 	 * @param report DONE 일 때만 있다 ({@code VideoReportResponse} 형태의 객체)
 	 * @param errorMessage FAILED 일 때만 있다. 그대로 화면에 띄워도 되는 문구다
 	 */
+	/**
+	 * @param capturedFrames 캡처가 존재하는 섹션 시각 목록 — 화면이 이미지 영역을 그릴지 판단한다
+	 */
 	public record Detail(UUID summaryId, String videoId, String url, String title, String channel,
 			Integer durationSec, VideoSummary.Status status, VideoSummary.Source source,
-			String errorMessage, Map<String, Object> report, OffsetDateTime createdAt) {
+			String errorMessage, Map<String, Object> report, java.util.List<Integer> capturedFrames,
+			OffsetDateTime createdAt) {
 	}
 
 	public record Row(UUID summaryId, String videoId, String title, String channel,

@@ -44,6 +44,9 @@ public enum LlmFeature {
 	/** 영상 요약 2단계 — 청크 요약들을 하나의 보고서로 통합한다. 영상당 한 번이다. */
 	VIDEO_REPORT,
 
+	/** 영상 QnA — 검색된 자막 발췌를 근거로 질문에 답한다. 질문당 한 번이다. */
+	VIDEO_QNA,
+
 	/**
 	 * 면접 연습 답변 채점 (docs/interview-practice-design.md).
 	 *

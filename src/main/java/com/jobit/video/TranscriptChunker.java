@@ -34,6 +34,15 @@ final class TranscriptChunker {
 	}
 
 	static List<Chunk> chunk(List<TranscriptSegment> segments) {
+		List<Chunk> chunks = split(segments, TARGET_CHARS);
+		if (chunks.size() > MAX_CHUNKS) {
+			throw new TooLongException(chunks.size());
+		}
+		return chunks;
+	}
+
+	/** 크기만 다른 분할 — QnA 세립 청크(~1,000자)가 같은 로직을 쓴다. 상한 검사는 호출부 몫이다. */
+	static List<Chunk> split(List<TranscriptSegment> segments, int targetChars) {
 		List<Chunk> chunks = new ArrayList<>();
 		StringBuilder current = new StringBuilder();
 		int currentStart = -1;
@@ -47,7 +56,7 @@ final class TranscriptChunker {
 			}
 			current.append(segment.text());
 
-			if (current.length() >= TARGET_CHARS) {
+			if (current.length() >= targetChars) {
 				chunks.add(new Chunk(currentStart, current.toString()));
 				current.setLength(0);
 				currentStart = -1;
@@ -55,10 +64,6 @@ final class TranscriptChunker {
 		}
 		if (!current.isEmpty()) {
 			chunks.add(new Chunk(currentStart, current.toString()));
-		}
-
-		if (chunks.size() > MAX_CHUNKS) {
-			throw new TooLongException(chunks.size());
 		}
 		return chunks;
 	}
