@@ -60,6 +60,9 @@ public class VideoSummaryService {
 
 	private final Clock clock;
 
+	/** 영상 길이 상한(초). 0 이면 끈다. 길이를 모르는 영상(라이브 등, duration 0)은 통과시킨다. */
+	private final int maxDurationSec;
+
 	/** 단일 워커 = GPU 큐. 가상 스레드 — 대부분을 subprocess·HTTP 대기로 보낸다. */
 	private final ExecutorService worker = Executors
 		.newSingleThreadExecutor(r -> Thread.ofVirtual().name("video-summary-worker").unstarted(r));
@@ -68,7 +71,8 @@ public class VideoSummaryService {
 			VideoSubmissionRepository submissionRepository, TranscriptService transcriptService,
 			VideoSummarizer summarizer, VideoChunkRepository chunkRepository,
 			com.jobit.llm.EmbeddingClient embeddingClient, VideoFrames frames, LlmGuard llmGuard,
-			TransactionTemplate transactionTemplate, Clock clock) {
+			TransactionTemplate transactionTemplate, Clock clock,
+			@org.springframework.beans.factory.annotation.Value("${jobit.video.max-duration-sec:7200}") int maxDurationSec) {
 		this.summaryRepository = summaryRepository;
 		this.submissionRepository = submissionRepository;
 		this.transcriptService = transcriptService;
@@ -79,6 +83,7 @@ public class VideoSummaryService {
 		this.llmGuard = llmGuard;
 		this.transactionTemplate = transactionTemplate;
 		this.clock = clock;
+		this.maxDurationSec = maxDurationSec;
 	}
 
 	/**
@@ -197,7 +202,7 @@ public class VideoSummaryService {
 
 		try {
 			TranscriptService.Result transcript = transcriptService.acquire(videoId,
-					meta -> gate(summaryId, meta, null));
+					this::durationGate, meta -> gate(summaryId, meta, null));
 			update(summaryId, s -> s.meta(transcript.meta().title(), transcript.meta().channel(),
 					transcript.meta().durationSec(), OffsetDateTime.now(clock)));
 
@@ -227,6 +232,18 @@ public class VideoSummaryService {
 		catch (Exception ex) {
 			update(summaryId, s -> s.fail(userMessage(ex), OffsetDateTime.now(clock)));
 			log.warn("영상 요약 실패: video={} — {}", videoId, ex.toString());
+		}
+	}
+
+	/**
+	 * 길이 게이트 — probe 직후, 자막 다운로드·STT 전에 검사한다. 상한을 넘는 영상은
+	 * 처리(STT 는 수십 분) 이전에 끊는 것이 이 게이트의 존재 이유다. 시간이 지나도 길이는
+	 * 변하지 않으므로 실패(재시도 유도)가 아니라 거부다.
+	 */
+	private void durationGate(YtDlp.Meta meta) {
+		if (maxDurationSec > 0 && meta.durationSec() > maxDurationSec) {
+			throw new RejectedException("영상이 너무 깁니다 (%d분, 최대 %d분). 더 짧은 영상으로 시도해 주세요."
+				.formatted(meta.durationSec() / 60, maxDurationSec / 60));
 		}
 	}
 

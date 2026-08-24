@@ -77,7 +77,7 @@ class VideoSummaryServiceTest {
 				mock(TranscriptService.class), mock(VideoSummarizer.class),
 				mock(VideoChunkRepository.class), mock(com.jobit.llm.EmbeddingClient.class),
 				mock(VideoFrames.class), llmGuard, transactionTemplate,
-				Clock.fixed(Instant.parse("2026-08-20T10:00:00Z"), ZoneOffset.UTC));
+				Clock.fixed(Instant.parse("2026-08-20T10:00:00Z"), ZoneOffset.UTC), 7_200);
 	}
 
 	@Test
