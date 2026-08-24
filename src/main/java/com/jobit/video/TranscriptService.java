@@ -36,15 +36,19 @@ public class TranscriptService {
 	/**
 	 * 임시 작업 디렉터리는 성공·실패와 무관하게 지운다 — 오디오 WAV 가 수십 MB 다.
 	 *
+	 * @param afterProbe 메타데이터를 알게 된 직후 훅 — 길이 제한이 여기 걸린다. 모든 경로에서
+	 *                   자막 다운로드·STT 보다 먼저 불린다 (긴 영상에 다운로드부터 시키지 않는다)
 	 * @param beforeStt STT 로 넘어가기 직전 훅 — 주제 게이트가 여기 걸린다. 자막이 있으면
 	 *                  불리지 않는다 (자막 확보는 수 초라 게이트를 내용 판정 한 번으로 미룬다)
 	 */
-	public Result acquire(String videoId, java.util.function.Consumer<YtDlp.Meta> beforeStt)
+	public Result acquire(String videoId, java.util.function.Consumer<YtDlp.Meta> afterProbe,
+			java.util.function.Consumer<YtDlp.Meta> beforeStt)
 			throws IOException, InterruptedException {
 		Path workDir = Files.createTempDirectory("jobit-video-" + videoId + "-");
 		try {
 			YtDlp.Probe probe = ytDlp.probe(videoId, workDir);
 			YtDlp.Meta meta = probe.meta();
+			afterProbe.accept(meta);
 
 			Optional<List<TranscriptSegment>> captions = ytDlp.captions(videoId, workDir, probe);
 			if (captions.isPresent()) {

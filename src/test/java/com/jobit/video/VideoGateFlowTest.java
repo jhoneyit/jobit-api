@@ -59,9 +59,11 @@ class VideoGateFlowTest {
 		given(summaryRepository.findById(summary.getId())).willReturn(Optional.of(summary));
 
 		YtDlp.Meta meta = new YtDlp.Meta("음악 모음", "뮤직채널", 300, "신나는 플레이리스트");
-		given(transcriptService.acquire(anyString(), any())).willAnswer(invocation -> {
-			// 실제 서비스처럼 STT 직전 훅을 부른다 — 자막 없는 영상 시나리오.
-			Consumer<YtDlp.Meta> beforeStt = invocation.getArgument(1);
+		given(transcriptService.acquire(anyString(), any(), any())).willAnswer(invocation -> {
+			// 실제 서비스처럼 probe 직후·STT 직전 훅을 순서대로 부른다 — 자막 없는 영상 시나리오.
+			Consumer<YtDlp.Meta> afterProbe = invocation.getArgument(1);
+			Consumer<YtDlp.Meta> beforeStt = invocation.getArgument(2);
+			afterProbe.accept(meta);
 			beforeStt.accept(meta);
 			return new TranscriptService.Result(meta,
 					List.of(new TranscriptSegment(0, "음악입니다")), TranscriptService.Source.STT);
@@ -71,7 +73,7 @@ class VideoGateFlowTest {
 				mock(VideoSubmissionRepository.class), transcriptService, summarizer,
 				mock(VideoChunkRepository.class), mock(com.jobit.llm.EmbeddingClient.class),
 				mock(VideoFrames.class), mock(LlmGuard.class), transactionTemplate,
-				Clock.fixed(Instant.parse("2026-08-20T10:00:00Z"), ZoneOffset.UTC));
+				Clock.fixed(Instant.parse("2026-08-20T10:00:00Z"), ZoneOffset.UTC), 7_200);
 	}
 
 	@Test
@@ -98,6 +100,25 @@ class VideoGateFlowTest {
 		service.process(summary.getId());
 
 		assertThat(summary.getStatus()).isEqualTo(VideoSummary.Status.REJECTED);
+		then(summarizer).should(never()).summarize(any());
+	}
+
+	@Test
+	@DisplayName("상한을 넘는 영상은 probe 직후 REJECTED — 자막 다운로드·STT·판정 어느 것도 타지 않는다")
+	void longVideoRejectedAtProbe() throws Exception {
+		YtDlp.Meta longMeta = new YtDlp.Meta("3시간 강의", "채널", 10_800, "설명");
+		// 재스텁은 do-style 로 — given() 스타일은 기존 answer 를 널 인자로 실행해 버린다.
+		org.mockito.BDDMockito.willAnswer(invocation -> {
+			Consumer<YtDlp.Meta> afterProbe = invocation.getArgument(1);
+			afterProbe.accept(longMeta); // 여기서 던져야 한다
+			throw new AssertionError("길이 게이트를 통과하면 안 된다");
+		}).given(transcriptService).acquire(anyString(), any(), any());
+
+		service.process(summary.getId());
+
+		assertThat(summary.getStatus()).isEqualTo(VideoSummary.Status.REJECTED);
+		assertThat(summary.getErrorMessage()).contains("너무 깁니다").contains("180분");
+		then(summarizer).should(never()).judgeRelevance(any(), any());
 		then(summarizer).should(never()).summarize(any());
 	}
 
