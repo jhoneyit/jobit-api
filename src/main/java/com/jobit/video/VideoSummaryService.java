@@ -227,7 +227,7 @@ public class VideoSummaryService {
 		}
 		catch (RejectedException ex) {
 			update(summaryId, s -> s.reject(ex.getMessage(), OffsetDateTime.now(clock)));
-			log.info("영상 요약 거부(주제 게이트): video={} — {}", videoId, ex.getMessage());
+			log.info("영상 요약 거부({}): video={} — {}", ex.gate, videoId, ex.getMessage());
 		}
 		catch (Exception ex) {
 			update(summaryId, s -> s.fail(userMessage(ex), OffsetDateTime.now(clock)));
@@ -242,8 +242,9 @@ public class VideoSummaryService {
 	 */
 	private void durationGate(YtDlp.Meta meta) {
 		if (maxDurationSec > 0 && meta.durationSec() > maxDurationSec) {
-			throw new RejectedException("영상이 너무 깁니다 (%d분, 최대 %d분). 더 짧은 영상으로 시도해 주세요."
-				.formatted(meta.durationSec() / 60, maxDurationSec / 60));
+			throw new RejectedException("길이 게이트",
+					"영상이 너무 깁니다 (%d분, 최대 %d분). 더 짧은 영상으로 시도해 주세요."
+						.formatted(meta.durationSec() / 60, maxDurationSec / 60));
 		}
 	}
 
@@ -258,7 +259,7 @@ public class VideoSummaryService {
 		if (!verdict.relevant()) {
 			String reason = verdict.reason() == null || verdict.reason().isBlank() ? ""
 					: " (" + verdict.reason().strip() + ")";
-			throw new RejectedException("면접·취업 준비와 관련된 영상만 요약합니다." + reason);
+			throw new RejectedException("주제 게이트", "면접·취업 준비와 관련된 영상만 요약합니다." + reason);
 		}
 	}
 
@@ -307,11 +308,14 @@ public class VideoSummaryService {
 		return head.toString();
 	}
 
-	/** 주제 게이트 거부. 메시지가 곧 사용자 문구다. */
+	/** 게이트 거부. 메시지가 곧 사용자 문구고, {@code gate} 는 로그가 사유를 구분하는 데만 쓴다. */
 	static class RejectedException extends RuntimeException {
 
-		RejectedException(String message) {
+		final String gate;
+
+		RejectedException(String gate, String message) {
 			super(message);
+			this.gate = gate;
 		}
 	}
 
