@@ -49,7 +49,14 @@ public class VideoQna {
 	public record Answer(String answer, List<Integer> refs) {
 	}
 
-	public Answer ask(UUID summaryId, String title, String question, List<String> history) {
+	/**
+	 * @param onAnswerDelta 답 텍스트가 만들어지는 대로 조각조각 받는다. 구조화 출력이라 JSON
+	 *        전체는 끝나야 파싱되지만, {@code answer} 필드의 내용만은
+	 *        {@link com.jobit.llm.JsonStringFieldStream} 이 흐르는 중에 뽑아 준다 — refs 는
+	 *        스트림이 끝난 뒤 재검증을 거쳐 반환값에만 실린다
+	 */
+	public Answer ask(UUID summaryId, String title, String question, List<String> history,
+			java.util.function.Consumer<String> onAnswerDelta) {
 		List<float[]> vectors = embeddingClient.embedAll(List.of(question));
 		if (vectors.isEmpty()) {
 			throw new LlmException(LlmException.Kind.INVALID_RESPONSE,
@@ -65,12 +72,20 @@ public class VideoQna {
 		}
 
 		LlmModelConfig.FeatureConfig config = LlmModelConfig.of(LlmFeature.VIDEO_QNA);
+		// 스트림 완료 객체의 content 는 비어 있다 — 원문은 우리가 모은다 (질문 생성과 같은 규약).
+		StringBuilder raw = new StringBuilder();
+		com.jobit.llm.JsonStringFieldStream answerField =
+				new com.jobit.llm.JsonStringFieldStream("answer", onAnswerDelta);
 		OllamaChatClient.Completion completion;
 		try {
-			completion = client.chat(new OllamaChatClient.Request(config.model(),
+			completion = client.stream(new OllamaChatClient.Request(config.model(),
 					VideoQnaPrompts.SYSTEM,
 					VideoQnaPrompts.userMessage(title, excerpts, history, question),
-					JsonSchemas.of(VideoQnaResponse.class), config.effort(), config.maxTokens()));
+					JsonSchemas.of(VideoQnaResponse.class), config.effort(), config.maxTokens()),
+					delta -> {
+						raw.append(delta);
+						answerField.feed(delta);
+					});
 		}
 		catch (OllamaChatClient.OllamaCallException ex) {
 			throw new LlmException(LlmException.Kind.UPSTREAM,
@@ -82,7 +97,7 @@ public class VideoQna {
 
 		VideoQnaResponse response;
 		try {
-			response = MAPPER.readValue(completion.content(), VideoQnaResponse.class);
+			response = MAPPER.readValue(raw.toString(), VideoQnaResponse.class);
 		}
 		catch (JacksonException ex) {
 			throw new LlmException(LlmException.Kind.INVALID_RESPONSE,
