@@ -114,7 +114,7 @@ public class VideoSummary {
 		this.updatedAt = now;
 	}
 
-	/** 재시도 진입 — FAILED·REJECTED 만 되돌린다. DONE 을 되돌리는 경로는 없다 (캐시가 목적이다). */
+	/** 재시도 진입 — FAILED·REJECTED, 그리고 프롬프트가 낡은 DONE(재요약)이 여기로 돌아온다. */
 	public void requeue(OffsetDateTime now) {
 		this.status = Status.PENDING;
 		this.errorMessage = null;

@@ -101,8 +101,9 @@ public class VideoSummaryService {
 			VideoSummary summary = existing.get();
 			link(ownerKey, summary);
 			if (summary.getStatus() == VideoSummary.Status.FAILED
-					|| summary.getStatus() == VideoSummary.Status.REJECTED) {
-				// 재시도는 새 처리이므로 한도를 소비한다. DONE·진행 중은 소비하지 않는다.
+					|| summary.getStatus() == VideoSummary.Status.REJECTED
+					|| staleReport(summary)) {
+				// 재시도·재요약은 새 처리이므로 한도를 소비한다. 신선한 DONE·진행 중은 소비하지 않는다.
 				// REJECTED 도 되살린다 — 판정이 틀렸다고 생각하면 다시 넣는 것이 사용자의 항의 수단이다.
 				llmGuard.checkAndConsume(ownerKey);
 				transactionTemplate.executeWithoutResult(tx -> summaryRepository
@@ -129,6 +130,17 @@ public class VideoSummaryService {
 		link(ownerKey, summary);
 		enqueue(summary.getId());
 		return summary;
+	}
+
+	/**
+	 * DONE 이라도 보고서를 구운 프롬프트가 지금 것과 다르면 캐시가 아니라 부채다 — 고쳐진
+	 * 결함(타임스탬프 전부 0:00)이 캐시에 갇혀 영영 나가는 것을 실제로 봤다. JD 파싱과 같은
+	 * 규약이다: prompt_version 이 다르면 재생성. 재제출이 갱신의 트리거이므로 아무도 다시
+	 * 찾지 않는 요약은 조용히 낡은 채 남고, 그건 낭비가 아니라 정확히 의도다.
+	 */
+	private static boolean staleReport(VideoSummary summary) {
+		return summary.getStatus() == VideoSummary.Status.DONE
+				&& !VideoPrompts.PROMPT_VERSION.equals(summary.getPromptVersion());
 	}
 
 	/** 조회 — 보고서 화면 폴링용. 공유 링크가 목적이라 소유자 없이도 ID 만 알면 읽는다. */
