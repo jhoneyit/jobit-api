@@ -103,9 +103,7 @@ class VideoSummaryServiceTest {
 	@Test
 	@DisplayName("이미 요약된 영상은 한도를 소비하지 않는다 — 전역 캐시가 목적이다")
 	void doneSummarySkipsGuard() {
-		VideoSummary done = new VideoSummary("dQw4w9WgXcQ", URL, null);
-		ReflectionTestUtils.setField(done, "id", UUID.randomUUID());
-		ReflectionTestUtils.setField(done, "status", VideoSummary.Status.DONE);
+		VideoSummary done = doneSummary(VideoPrompts.PROMPT_VERSION);
 		given(summaryRepository.findByVideoId("dQw4w9WgXcQ")).willReturn(Optional.of(done));
 		given(summaryRepository.findById(done.getId())).willReturn(Optional.of(done));
 
@@ -114,6 +112,27 @@ class VideoSummaryServiceTest {
 		assertThat(result.getStatus()).isEqualTo(VideoSummary.Status.DONE);
 		then(llmGuard).should(never()).checkAndConsume(anyString());
 		then(submissionRepository).should().save(any(VideoSubmission.class));
+	}
+
+	@Test
+	@DisplayName("낡은 프롬프트로 구운 DONE 은 재요약이다 — 한도를 소비하고 PENDING 으로 되돌린다")
+	void staleDoneSummaryRequeues() {
+		VideoSummary stale = doneSummary("2026-08-20.1");
+		given(summaryRepository.findByVideoId("dQw4w9WgXcQ")).willReturn(Optional.of(stale));
+		given(summaryRepository.findById(stale.getId())).willReturn(Optional.of(stale));
+
+		service.submit(OWNER, URL);
+
+		then(llmGuard).should().checkAndConsume(OWNER);
+		assertThat(stale.getStatus()).isEqualTo(VideoSummary.Status.PENDING);
+	}
+
+	private static VideoSummary doneSummary(String promptVersion) {
+		VideoSummary done = new VideoSummary("dQw4w9WgXcQ", URL, null);
+		ReflectionTestUtils.setField(done, "id", UUID.randomUUID());
+		ReflectionTestUtils.setField(done, "status", VideoSummary.Status.DONE);
+		ReflectionTestUtils.setField(done, "promptVersion", promptVersion);
+		return done;
 	}
 
 	@Test
