@@ -29,8 +29,12 @@ public class VideoQnaService {
 
 	private final Optional<VideoQna> qna;
 
-	public VideoQna.Answer ask(String ownerKey, UUID summaryId, String question,
-			List<String> history) {
+	/**
+	 * 검증·한도 소비까지만 하고 실행 준비물을 돌려준다. 추론은 호출부가 SSE 를 연 뒤 워커
+	 * 스레드에서 {@link Prepared#ask} 로 돌린다 — 404·409·429 가 스트림이 열리기 전에
+	 * 평범한 HTTP 오류로 나가야 하기 때문에 두 단계를 가른다.
+	 */
+	public Prepared prepare(String ownerKey, UUID summaryId, List<String> history) {
 
 		VideoSummary summary = summaryRepository.findById(summaryId)
 			.orElseThrow(() -> new NotFoundException("video summary not found: " + summaryId));
@@ -49,7 +53,15 @@ public class VideoQnaService {
 
 		List<String> trimmed = history == null ? List.of()
 				: history.subList(Math.max(0, history.size() - MAX_HISTORY), history.size());
-		return engine.ask(summaryId, summary.getTitle(), question, trimmed);
+		return new Prepared(engine, summaryId, summary.getTitle(), trimmed);
+	}
+
+	/** 검증·한도가 끝난 QnA 1건. 실패해도 한도는 이미 소비됐다 — 추론은 실제로 일어났으므로. */
+	public record Prepared(VideoQna engine, UUID summaryId, String title, List<String> history) {
+
+		public VideoQna.Answer ask(String question, java.util.function.Consumer<String> onAnswerDelta) {
+			return engine.ask(summaryId, title, question, history, onAnswerDelta);
+		}
 	}
 
 	/** 사용자가 지금 할 수 없는 상태 — 문구가 다음 행동을 말한다. 409 로 나간다. */
