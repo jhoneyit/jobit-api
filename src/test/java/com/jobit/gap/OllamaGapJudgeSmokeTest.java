@@ -47,7 +47,7 @@ class OllamaGapJudgeSmokeTest {
 	private static final UUID UNRELATED_B = UUID.randomUUID();
 
 	private GapJudge newJudge() {
-		return new OllamaGapJudge(new OllamaChatClient(BASE_URL, 16_384), new RecordingSpy());
+		return new OllamaGapJudge(new OllamaChatClient(BASE_URL, 16_384, "1h"), new RecordingSpy());
 	}
 
 	@Test

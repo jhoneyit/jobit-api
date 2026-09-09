@@ -62,7 +62,7 @@ class OllamaAnswerScorerSmokeTest {
 	private static final String POOR_ANSWER = "음... 트랜잭션은 중요하다고 생각합니다. 데이터가 안 깨지게 하는 거죠. 네.";
 
 	private AnswerScorer newScorer() {
-		OllamaChatClient client = new OllamaChatClient(BASE_URL, 16_384);
+		OllamaChatClient client = new OllamaChatClient(BASE_URL, 16_384, "1h");
 		return new OllamaAnswerScorer(client, new RecordingSpy());
 	}
 

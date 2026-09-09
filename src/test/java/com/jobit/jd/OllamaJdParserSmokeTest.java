@@ -70,7 +70,7 @@ class OllamaJdParserSmokeTest {
 	@Test
 	@DisplayName("실제 Ollama 호출로 JD가 요구사항 목록까지 파싱된다")
 	void parsesRealJobPosting() {
-		OllamaChatClient client = new OllamaChatClient(BASE_URL, 16_384);
+		OllamaChatClient client = new OllamaChatClient(BASE_URL, 16_384, "1h");
 		JdParser parser = new OllamaJdParser(client, new RecordingSpy());
 
 		JdParser.ParsedJd parsed = parser.parse(SAMPLE_JD);
