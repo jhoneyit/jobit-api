@@ -23,7 +23,7 @@ class OllamaRequestBodyTest {
 	private static final Map<String, Object> SCHEMA = Map.of("type", "object");
 
 	private static OllamaChatClient client() {
-		return new OllamaChatClient("http://localhost:11434", 16_384);
+		return new OllamaChatClient("http://localhost:11434", 16_384, "1h");
 	}
 
 	private static OllamaChatClient.Request request(Effort effort) {
@@ -39,6 +39,12 @@ class OllamaRequestBodyTest {
 		assertThat(body.get("options")).asInstanceOf(MAP)
 			.containsEntry("num_ctx", 16_384)
 			.containsEntry("num_predict", 2_000L);
+	}
+
+	@Test
+	@DisplayName("keep_alive 가 반드시 실린다 — 빠지면 5분 유휴에 모델이 내려가 콜드 로드를 문다")
+	void alwaysCarriesKeepAlive() {
+		assertThat(client().body(request(Effort.LOW), false)).containsEntry("keep_alive", "1h");
 	}
 
 	@Test

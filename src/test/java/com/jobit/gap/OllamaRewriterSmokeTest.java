@@ -33,7 +33,7 @@ class OllamaRewriterSmokeTest {
 	@Test
 	@DisplayName("수치 없는 WEAK 문장이 자리 표시를 얻는다 — 숫자를 지어내는 대신")
 	void rewritesWithPlaceholders() {
-		Rewriter rewriter = new OllamaRewriter(new OllamaChatClient(BASE_URL, 16_384),
+		Rewriter rewriter = new OllamaRewriter(new OllamaChatClient(BASE_URL, 16_384, "1h"),
 				new RecordingSpy());
 
 		String original = "정산 배치를 운영했습니다.";

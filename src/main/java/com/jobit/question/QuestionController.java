@@ -7,6 +7,9 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
@@ -49,10 +52,35 @@ public class QuestionController {
 	 */
 	private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
 
+	/**
+	 * thinking 동안(첫 질문까지 1분+)은 이벤트가 하나도 없다 — 그 침묵이 리버스 프록시의
+	 * 유휴 컷(nginx 기본 60초)보다 길면 정상 생성이 끊긴다. SSE 주석(":")을 주기적으로 흘려
+	 * 회선만 살린다 — 주석은 클라이언트 파서가 버리므로 화면 쪽 변경이 없다.
+	 */
+	private static final long HEARTBEAT_MS = 15_000L;
+
+	private final ScheduledExecutorService heartbeats = Executors
+		.newSingleThreadScheduledExecutor(Thread.ofVirtual().factory());
+
 	@GetMapping(path = "/api/questions", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
 	public SseEmitter stream(@RequestParam UUID jobPostingId,
 			@RequestHeader(name = "X-Owner-Key", required = false) String ownerKey) {
 		SseEmitter emitter = new SseEmitter(TIMEOUT_MS);
+
+		ScheduledFuture<?> heartbeat = heartbeats.scheduleAtFixedRate(() -> {
+			try {
+				// send() 는 질문 스레드와 경합하므로 emitter 로 직렬화한다 (아래 send 와 같은 락).
+				synchronized (emitter) {
+					emitter.send(SseEmitter.event().comment("keep-alive"));
+				}
+			}
+			catch (IOException | IllegalStateException ex) {
+				// 끊긴 연결 — 본 작업이 다음 send 에서 알게 되므로 여기서는 조용히 둔다.
+			}
+		}, HEARTBEAT_MS, HEARTBEAT_MS, TimeUnit.MILLISECONDS);
+		emitter.onCompletion(() -> heartbeat.cancel(false));
+		emitter.onTimeout(() -> heartbeat.cancel(false));
+		emitter.onError(ex -> heartbeat.cancel(false));
 
 		executor.execute(() -> {
 			try {
@@ -106,7 +134,10 @@ public class QuestionController {
 	 */
 	private void send(SseEmitter emitter, String name, Object data) {
 		try {
-			emitter.send(SseEmitter.event().name(name).data(data, MediaType.APPLICATION_JSON));
+			// 하트비트 스레드와 경합한다 — SseEmitter.send 는 동시 호출을 보장하지 않는다.
+			synchronized (emitter) {
+				emitter.send(SseEmitter.event().name(name).data(data, MediaType.APPLICATION_JSON));
+			}
 		}
 		catch (IOException | IllegalStateException ex) {
 			throw new ClientGoneException(ex);
@@ -115,8 +146,10 @@ public class QuestionController {
 
 	private void fail(SseEmitter emitter, String message) {
 		try {
-			emitter.send(SseEmitter.event().name("error").data(Map.of("message", message),
-					MediaType.APPLICATION_JSON));
+			synchronized (emitter) {
+				emitter.send(SseEmitter.event().name("error").data(Map.of("message", message),
+						MediaType.APPLICATION_JSON));
+			}
 			emitter.complete();
 		}
 		catch (IOException | IllegalStateException ex) {

@@ -73,8 +73,11 @@ public class OllamaChatClient {
 
 	private final int numCtx;
 
+	private final String keepAlive;
+
 	public OllamaChatClient(@Value("${ollama.base-url}") String baseUrl,
-			@Value("${jobit.llm.ollama.num-ctx:16384}") int numCtx) {
+			@Value("${jobit.llm.ollama.num-ctx:16384}") int numCtx,
+			@Value("${jobit.llm.ollama.keep-alive:1h}") String keepAlive) {
 
 		SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
 		factory.setConnectTimeout(Duration.ofSeconds(5));
@@ -82,8 +85,10 @@ public class OllamaChatClient {
 
 		this.restClient = RestClient.builder().baseUrl(baseUrl).requestFactory(factory).build();
 		this.numCtx = numCtx;
+		this.keepAlive = keepAlive;
 
-		log.info("Ollama 클라이언트 준비됨 (baseUrl={} numCtx={})", baseUrl, numCtx);
+		log.info("Ollama 클라이언트 준비됨 (baseUrl={} numCtx={} keepAlive={})", baseUrl, numCtx,
+				keepAlive);
 	}
 
 	/** 한 번에 받아 오는 호출. 구조화 출력이므로 {@link Completion#content()} 는 JSON 문자열이다. */
@@ -219,6 +224,9 @@ public class OllamaChatClient {
 		body.put("format", request.schema());
 		body.put("think", think);
 		body.put("stream", stream);
+		// Ollama 기본 5분 — 유휴로 모델이 내려가면 다음 호출이 콜드 로드(수십 초) + KV 캐시
+		// 소실을 함께 문다. 서버 환경변수(OLLAMA_KEEP_ALIVE)에 기대지 않고 요청마다 싣는다.
+		body.put("keep_alive", keepAlive);
 		body.put("options", options);
 		return body;
 	}

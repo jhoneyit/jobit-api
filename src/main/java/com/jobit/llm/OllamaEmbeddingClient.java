@@ -59,9 +59,12 @@ public class OllamaEmbeddingClient implements EmbeddingClient {
 
 	private final int dimensions;
 
+	private final String keepAlive;
+
 	public OllamaEmbeddingClient(@Value("${ollama.base-url}") String baseUrl,
 			@Value("${jobit.llm.ollama.embedding-model:qwen3-embedding:0.6b}") String model,
 			@Value("${jobit.llm.ollama.embedding-dimensions:1024}") int dimensions,
+			@Value("${jobit.llm.ollama.keep-alive:1h}") String keepAlive,
 			LlmCallRecorder callRecorder) {
 
 		SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
@@ -72,6 +75,7 @@ public class OllamaEmbeddingClient implements EmbeddingClient {
 		this.callRecorder = callRecorder;
 		this.model = model;
 		this.dimensions = dimensions;
+		this.keepAlive = keepAlive;
 
 		log.info("Ollama 임베딩 클라이언트 준비됨 (model={} dim={})", model, dimensions);
 	}
@@ -103,7 +107,7 @@ public class OllamaEmbeddingClient implements EmbeddingClient {
 			response = restClient.post()
 				.uri("/api/embed")
 				.contentType(MediaType.APPLICATION_JSON)
-				.body(Map.of("model", model, "input", batch))
+				.body(Map.of("model", model, "input", batch, "keep_alive", keepAlive))
 				.retrieve()
 				.body(EmbedResponse.class);
 		}
